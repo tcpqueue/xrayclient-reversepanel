@@ -29,7 +29,7 @@ import (
 	"github.com/xtls/xray-core/transport/internet/tls"
 )
 
-// Config 是 xray-lite 自己的极简配置（不经过 Xray 的 infra/conf）。
+// Config 是 xrayclient-reversepanel 自己的极简配置（不经过 Xray 的 infra/conf）。
 type Config struct {
 	Servers  []ServerConfig `json:"servers"`
 	Allow    []AllowEntry   `json:"allow"`    // 允许服务端访问的本地目标

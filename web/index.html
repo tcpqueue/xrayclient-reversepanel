@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>xray-lite</title>
+<title>xrayclient-reversepanel</title>
 <script>
   // 跟随系统亮/暗色
   (function () {
@@ -22,7 +22,7 @@
   <div v-if="auth.checked && !auth.loggedIn" class="login-wrap">
     <form class="card login-card shadow-sm" @submit.prevent="doLogin">
       <div class="card-body p-4">
-        <div class="brand mb-1">xray-lite</div>
+        <div class="brand mb-1">xrayclient-reversepanel</div>
         <div class="text-body-secondary small mb-4">VLESS 反向代理客户端 · 管理登录</div>
         <div class="mb-3"><label class="form-label">用户名</label><input class="form-control" v-model.trim="loginForm.user" autocomplete="username" autofocus></div>
         <div class="mb-3"><label class="form-label">密码</label><input class="form-control" type="password" v-model="loginForm.password" autocomplete="current-password"></div>
@@ -38,7 +38,7 @@
   <!-- ============ 顶栏（LuCI bootstrap 风格） ============ -->
   <nav class="navbar navbar-expand-md navbar-dark bg-dark sticky-top shadow-sm">
     <div class="container-xl">
-      <a class="navbar-brand fw-semibold" href="#dashboard">xray-lite <small class="text-secondary fw-normal ms-1">{{ status.version ? 'Xray ' + status.version : '' }}</small></a>
+      <a class="navbar-brand fw-semibold" href="#dashboard">xrayclient-reversepanel <small class="text-secondary fw-normal ms-1">{{ status.version ? 'Xray ' + status.version : '' }}</small></a>
       <button class="navbar-toggler" type="button" @click="navOpen = !navOpen"><span class="navbar-toggler-icon"></span></button>
       <div class="collapse navbar-collapse" :class="{ show: navOpen }">
         <ul class="navbar-nav me-auto">
@@ -97,7 +97,7 @@
           <div v-else class="topo-wrap" ref="topoWrap" @mouseleave="hover = null; tip = null">
           <svg class="topo" :viewBox="'0 0 ' + topo.w + ' ' + topo.h" :style="{ maxHeight: topo.h * 1.2 + 'px' }">
             <text class="col-title" :x="topo.cols[0] + topo.nw / 2" y="18">出站对象（本地服务）</text>
-            <text class="col-title" :x="topo.cols[1] + topo.nw / 2" y="18">xray-lite 本体</text>
+            <text class="col-title" :x="topo.cols[1] + topo.nw / 2" y="18">xrayclient-reversepanel 本体</text>
             <text class="col-title" :x="topo.cols[2] + topo.nw / 2" y="18">服务端</text>
             <text class="col-title" :x="topo.cols[3] + topo.nw / 2" y="18">服务端入口</text>
 

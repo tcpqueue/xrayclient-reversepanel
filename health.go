@@ -288,7 +288,7 @@ func (st *healthState) check(ctx context.Context, client *http.Client, timeout t
 		if err != nil {
 			return err
 		}
-		req.Header.Set("User-Agent", "xray-lite-health")
+		req.Header.Set("User-Agent", "xrayclient-reversepanel-health")
 		resp, err := client.Do(req)
 		if err != nil {
 			return shortErr(err)

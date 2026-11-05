@@ -2,8 +2,8 @@
 /dist/
 *.exe
 *.exe~
-/xray-lite
-/xray-lite-*
+/xrayclient-reversepanel
+/xrayclient-reversepanel-*
 
 # 本地运行配置（含密钥/密码），不要提交
 /config.json

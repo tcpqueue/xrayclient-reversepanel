@@ -1,4 +1,4 @@
-/* xray-lite 管理网页（Vue 3，无构建步骤） */
+/* xrayclient-reversepanel 管理网页（Vue 3，无构建步骤） */
 (function () {
   "use strict";
   const { createApp, reactive, ref, computed, watch, nextTick } = Vue;
@@ -89,12 +89,12 @@
     const q = u.searchParams, uuid = decodeURIComponent(u.username);
     if (!uuid) throw new Error("链接中缺少 UUID");
     const type = (q.get("type") || "tcp").toLowerCase();
-    if (type !== "tcp" && type !== "raw") throw new Error(`传输方式是 ${type}，xray-lite 只支持 RAW(tcp)`);
+    if (type !== "tcp" && type !== "raw") throw new Error(`传输方式是 ${type}，xrayclient-reversepanel 只支持 RAW(tcp)`);
     if ((q.get("headerType") || "none").toLowerCase() !== "none") throw new Error("不支持 RAW 的 http 伪装头");
     const sec = (q.get("security") || "none").toLowerCase();
-    if (sec !== "reality" && sec !== "none") throw new Error(`security 是 ${sec}，xray-lite 只支持 reality 或 none + encryption`);
+    if (sec !== "reality" && sec !== "none") throw new Error(`security 是 ${sec}，xrayclient-reversepanel 只支持 reality 或 none + encryption`);
     const enc = q.get("encryption") || "none";
-    if (sec === "none" && enc === "none") throw new Error("security=none 且 encryption=none 是明文，xray-lite 不允许");
+    if (sec === "none" && enc === "none") throw new Error("security=none 且 encryption=none 是明文，xrayclient-reversepanel 不允许");
     return {
       server: u.hostname + ":" + (u.port || "443"), uuid, flow: q.get("flow") || "", security: sec, encryption: enc,
       reality: sec === "reality" ? { serverName: q.get("sni") || "", password: q.get("pbk") || q.get("password") || "", shortId: q.get("sid") || "", fingerprint: (q.get("fp") || "chrome").toLowerCase(), spiderX: q.get("spx") || "", mldsa65Verify: q.get("pqv") || "" } : null,
@@ -109,7 +109,7 @@
       const r = s.reality; q.set("sni", r.serverName); q.set("fp", r.fingerprint); q.set("pbk", r.password); q.set("sid", r.shortId);
       if (r.spiderX) q.set("spx", r.spiderX); if (r.mldsa65Verify) q.set("pqv", r.mldsa65Verify);
     }
-    return `vless://${encodeURIComponent(s.uuid)}@${s.server}?${q.toString()}#${encodeURIComponent(s.name || s.tag || "xray-lite")}`;
+    return `vless://${encodeURIComponent(s.uuid)}@${s.server}?${q.toString()}#${encodeURIComponent(s.name || s.tag || "xrayclient-reversepanel")}`;
   }
 
   // ---------------- 应用 ----------------
@@ -286,7 +286,7 @@
         });
       });
 
-      // ---------- 拓扑图（使用已生效的配置）：出站对象 → xray-lite 本体 → 服务端 → 服务端入口 ----------
+      // ---------- 拓扑图（使用已生效的配置）：出站对象 → xrayclient-reversepanel 本体 → 服务端 → 服务端入口 ----------
       const hv = (a) => (status.value.health || {})[outKey(a)] || null;
       // 出站对象 ↔ 本体 这段链路：健康检测失败 = 断线；有流量 = 传输中；检测正常 = 空闲；没开检测又没数据 = 未监测
       function outLink(a) {
@@ -372,11 +372,11 @@
           nodes.push({ id, kind: "srv", state: st, x: cols[2], y, l1: s.name, l2: `${s.server || "-"} · ${stateText(st)}`, tip, chain, ref: { type: "srv", name: s.name } });
         });
 
-        // xray-lite 本体
+        // xrayclient-reversepanel 本体
         const coreChain = chains["core"] || new Set(["core"]);
-        nodes.push({ id: "core", kind: "core", state: s0.state || "stopped", x: cols[1], y: yc - NH / 2, l1: "xray-lite 本体",
+        nodes.push({ id: "core", kind: "core", state: s0.state || "stopped", x: cols[1], y: yc - NH / 2, l1: "xrayclient-reversepanel 本体",
           l2: `${s0.rssMB ? s0.rssMB + " MB" : (s0.sysMB || 0) + " MB"} · 连接 ${s0.active ?? 0}`,
-          tip: { title: "xray-lite 本体", state: s0.state === "online" ? "idle" : s0.state === "stopped" ? "disabled" : "down", stateText: stateText(s0.state) + (s0.detail ? "：" + s0.detail : ""),
+          tip: { title: "xrayclient-reversepanel 本体", state: s0.state === "online" ? "idle" : s0.state === "stopped" ? "disabled" : "down", stateText: stateText(s0.state) + (s0.detail ? "：" + s0.detail : ""),
             lines: [`实时 上传 ${fmtRate(rates.total.up)} / 下载 ${fmtRate(rates.total.down)}`, `累计 上传 ${fmtBytes(s0.tx)} / 下载 ${fmtBytes(s0.rx)}`,
               `内存 ${s0.rssMB || s0.sysMB || 0} MB · Go 堆 ${s0.heapMB ?? 0} MB · 协程 ${s0.goroutines ?? 0}`, `CPU 线程 ${s0.maxProcs ?? "-"} · 运行 ${fmtDur(s0.uptime)}`] },
           chain: coreChain, ref: { type: "core" } });
@@ -596,7 +596,7 @@
   });
   // 任何渲染错误都只提示，不让整页白屏
   app.config.errorHandler = (err, inst, info) => {
-    console.error("[xray-lite]", info, err);
+    console.error("[xrayclient-reversepanel]", info, err);
     let box = document.getElementById("xl-err");
     if (!box) { box = document.createElement("div"); box.id = "xl-err"; box.className = "alert alert-danger position-fixed bottom-0 end-0 m-3 small shadow"; box.style.zIndex = 3000; box.style.maxWidth = "420px"; document.body.append(box); }
     box.textContent = "页面出错（" + info + "）：" + (err && err.message || err) + "。刷新页面通常可以恢复，如反复出现请把这段文字发给开发者。";

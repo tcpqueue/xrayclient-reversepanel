@@ -1,4 +1,4 @@
-// xray-lite：只做 VLESS 新版内置 reverse 的精简客户端（类似 frpc），
+// xrayclient-reversepanel：只做 VLESS 新版内置 reverse 的精简客户端（类似 frpc），
 // 服务端使用官方完整版 Xray。
 package main
 
@@ -26,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Println("xray-lite, based on Xray-core", core.Version())
+		fmt.Println("xrayclient-reversepanel, based on Xray-core", core.Version())
 		return
 	}
 
@@ -69,7 +69,7 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "错误:", err, "（可在管理网页中修改配置）")
 	} else {
-		fmt.Fprintln(os.Stderr, "xray-lite 已启动，Xray-core", core.Version())
+		fmt.Fprintln(os.Stderr, "xrayclient-reversepanel 已启动，Xray-core", core.Version())
 	}
 	if webOn {
 		if err := startWeb(c.Web, r); err != nil {

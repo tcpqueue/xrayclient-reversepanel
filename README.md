@@ -1,11 +1,11 @@
-# xray-lite
+# xrayclient-reversepanel
 
 一个只做 **VLESS 反向代理** 的精简 Xray 客户端，用法类似 frpc：装在内网机器上，主动连到公网的**官方 Xray**，把内网服务安全地暴露出去。带一个内嵌的管理网页（拓扑图、实时流量、健康检测）。
 
 > 非官方项目，基于 [Xray-core](https://github.com/XTLS/Xray-core) 作为库构建，与 XTLS / Project X 无关。服务端请直接使用官方 Xray。
 
 ```
-本地服务 ⇄ [xray-lite] ══ VLESS (REALITY / Encryption) ══▶ [官方 Xray] ⇄ 外部访问者
+本地服务 ⇄ [xrayclient-reversepanel] ══ VLESS (REALITY / Encryption) ══▶ [官方 Xray] ⇄ 外部访问者
  (内网)       (客户端，主动连出)                              (公网服务端)
 ```
 
@@ -18,7 +18,7 @@
 - **健康检测**：对本地服务做 TCP / UDP / HTTP / HTTPS 检测（HTTPS 可忽略证书），结果显示在拓扑图和流量曲线上
 - **管理网页**（Vue 3 + Bootstrap 5，资源全部内嵌，离线可用）：
   - 概览大屏：在线服务端、连接数、实时/累计流量、内存
-  - 链路拓扑图：本地服务 → xray-lite → 服务端 → 服务端入口，用颜色区分传输中 / 空闲 / 断线 / 停用 / 未监测，悬停看实时速率
+  - 链路拓扑图：本地服务 → xrayclient-reversepanel → 服务端 → 服务端入口，用颜色区分传输中 / 空闲 / 断线 / 停用 / 未监测，悬停看实时速率
   - 实时流量曲线：带刻度，可按服务端切换或对比，悬停看任意时刻的速率和健康异常
   - 服务端 / 出站管理：改动先暂存，统一“保存并应用”（热重载，失败自动回滚）
   - 分享链接导入/导出（3x-ui / Xray 标准 `vless://`）、UUID / REALITY / VLESS Encryption 密钥生成、服务端配置片段生成
@@ -31,17 +31,17 @@
 需要 Go 1.27（`GOTOOLCHAIN=auto` 会自动下载）。
 
 ```bash
-git clone https://github.com/tcpqueue/xray-lite.git
-cd xray-lite
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xray-lite .
+git clone https://github.com/tcpqueue/xrayclient-reversepanel.git
+cd xrayclient-reversepanel
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xrayclient-reversepanel .
 ```
 
 交叉编译示例：
 
 ```bash
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xray-lite-linux-arm64 .
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xray-lite-linux-armv7 .
-GOOS=linux GOARCH=mipsle GOMIPS=softfloat CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xray-lite-linux-mipsle .
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xrayclient-reversepanel-linux-arm64 .
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xrayclient-reversepanel-linux-armv7 .
+GOOS=linux GOARCH=mipsle GOMIPS=softfloat CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o xrayclient-reversepanel-linux-mipsle .
 ```
 
 | 平台 | 体积（`-s -w`） |
@@ -55,10 +55,10 @@ GOOS=linux GOARCH=mipsle GOMIPS=softfloat CGO_ENABLED=0 go build -trimpath -ldfl
 ### 2. 安装到客户端（以 systemd 为例）
 
 ```bash
-mkdir -p /usr/local/xray-lite && chmod 700 /usr/local/xray-lite
-cp xray-lite /usr/local/xray-lite/
-cp examples/xray-lite.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now xray-lite
+mkdir -p /usr/local/xrayclient-reversepanel && chmod 700 /usr/local/xrayclient-reversepanel
+cp xrayclient-reversepanel /usr/local/xrayclient-reversepanel/
+cp examples/xrayclient-reversepanel.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now xrayclient-reversepanel
 ```
 
 没有配置文件时只会启动管理网页（默认 `127.0.0.1:7400`）。需要从其他机器访问时，用 `-web 0.0.0.0:7400` 启动，或在配置里写 `"web": {"listen": "0.0.0.0:7400"}`。
@@ -73,7 +73,7 @@ systemctl daemon-reload && systemctl enable --now xray-lite
 
 ## 服务端怎么配
 
-- 每台 xray-lite 对应服务端 VLESS 入站里的**一个 client**，该 client 带 `"reverse": {"tag": "r-xxx"}`
+- 每台 xrayclient-reversepanel 对应服务端 VLESS 入站里的**一个 client**，该 client 带 `"reverse": {"tag": "r-xxx"}`
 - 客户端连上后，服务端会**自动生成一个名为 `r-xxx` 的出站**（不需要写进 `outbounds`）
 - 在服务端自己创建入站（通常是 `tunnel`），`address:port` 写**客户端那边**要访问的地址，再用路由把这些入站指到 `r-xxx`
 - **一个 tag 可以承载任意多个端口**；多台客户端用多个 client、不同的 tag
@@ -153,11 +153,11 @@ systemctl daemon-reload && systemctl enable --now xray-lite
 ### 命令行
 
 ```
-xray-lite -c config.json       # 指定配置文件
-xray-lite -test -c config.json # 只检查配置
-xray-lite -web 0.0.0.0:7400    # 覆盖网页监听地址
-xray-lite -memstats 10s        # 定时打印 Go 内存统计（调试用）
-xray-lite -version
+xrayclient-reversepanel -c config.json       # 指定配置文件
+xrayclient-reversepanel -test -c config.json # 只检查配置
+xrayclient-reversepanel -web 0.0.0.0:7400    # 覆盖网页监听地址
+xrayclient-reversepanel -memstats 10s        # 定时打印 Go 内存统计（调试用）
+xrayclient-reversepanel -version
 ```
 
 ## 设计说明
@@ -171,7 +171,7 @@ xray-lite -version
 
 Windows amd64，本机回环，同一服务端：
 
-| | 官方 Xray 作为客户端 | xray-lite |
+| | 官方 Xray 作为客户端 | xrayclient-reversepanel |
 |---|---|---|
 | 空闲工作集 | 23.1 MB | 16–18 MB |
 | 20 并发 × 30 MB 下载后 | 61.9 MB | 29 MB |
@@ -197,7 +197,7 @@ ARM64（RK3568，Debian 12）空闲 RSS：1 线程约 13 MB，4 线程约 16–1
 
 ```bash
 go vet ./...
-go build -tags pprof -o xray-lite-pprof .   # 带 pprof：XRAY_LITE_PPROF=127.0.0.1:6060 ./xray-lite-pprof
+go build -tags pprof -o xrayclient-reversepanel-pprof .   # 带 pprof：XRAYCLIENT_REVERSEPANEL_PPROF=127.0.0.1:6060 ./xrayclient-reversepanel-pprof
 ```
 
 升级 Xray-core：`go get github.com/xtls/xray-core@<commit>`，然后对照上游 `infra/conf/vless.go`、`infra/conf/transport_security.go` 检查 `config.go` 中复刻的解析逻辑是否需要同步。

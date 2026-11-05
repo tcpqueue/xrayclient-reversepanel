@@ -1,4 +1,4 @@
-module github.com/tcpqueue/xray-lite
+module github.com/tcpqueue/xrayclient-reversepanel
 
 go 1.27
 
