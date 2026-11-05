@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: vet
+        run: go vet ./...
+      - name: test（含与上游 infra/conf 的对比测试）
+        run: go test ./...
+      - name: shell 语法
+        run: sh -n install.sh && sh -n scripts/build.sh
+      - name: build（确认二进制没有引入 router/dns/infra/conf）
+        run: |
+          go build -o /tmp/xrp .
+          if go list -deps . | grep -E 'xray-core/(infra/conf|app/router|app/dns)$'; then
+            echo "引入了不该引入的上游模块"; exit 1
+          fi
+          ls -l /tmp/xrp

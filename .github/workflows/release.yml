@@ -1,0 +1,79 @@
+name: release
+
+# 推送 v* 标签时：测试 → 编译全部架构 → 创建 GitHub Release → 构建并推送多架构 Docker 镜像到 ghcr.io
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # 生成更新日志需要完整历史
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+      - name: build
+        run: sh scripts/build.sh "${GITHUB_REF_NAME}"
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$(mktemp)"
+          {
+            echo "## 安装"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh -o install.sh && sh install.sh install"
+            echo '```'
+            echo
+            echo "国内网络可加 GitHub 代理："
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://ghfast.top/https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh -o install.sh && sh install.sh install --proxy https://ghfast.top/"
+            echo '```'
+            echo
+            echo "Docker：\`ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME#v}\`"
+            echo
+            echo "## 更新内容"
+            echo
+            git log --pretty='- %s' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" 2>/dev/null || true
+          } > "$notes"
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.zip dist/sha256sums.txt dist/VERSION dist/install.sh \
+            --title "${GITHUB_REF_NAME}" --notes-file "$notes" --verify-tag
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7,linux/arm/v6,linux/riscv64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

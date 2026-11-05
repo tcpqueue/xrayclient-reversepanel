@@ -1,4 +1,4 @@
-package main
+package xray
 
 // 密钥生成，与官方 `xray uuid` / `xray x25519` / `xray vlessenc` 输出格式一致。
 // 只用 Go 标准库（crypto/ecdh、crypto/mlkem），不额外引入依赖。
@@ -64,7 +64,7 @@ func genVLESSEnc(auth, mode string) (decryption, encryption string, err error) {
 	return
 }
 
-func generate(kind, auth, mode string) (map[string]string, error) {
+func Generate(kind, auth, mode string) (map[string]string, error) {
 	switch kind {
 	case "uuid":
 		u := uuid.New()

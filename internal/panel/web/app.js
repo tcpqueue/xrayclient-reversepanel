@@ -554,7 +554,33 @@
       async function afterLogin() {
         const s = await api("/api/session");
         Object.assign(auth, { checked: true, loggedIn: !!s.loggedIn, user: s.user || "", defaultPassword: !!s.defaultPassword });
-        if (auth.loggedIn) { pwForm.user = auth.user; prev = null; hist.samples.length = 0; await loadConfig(); poll(); }
+        if (auth.loggedIn) { pwForm.user = auth.user; prev = null; hist.samples.length = 0; await loadConfig(); poll(); loadWeb().catch(() => {}); }
+      }
+
+      // ---------- 管理网页监听 ----------
+      const webInfo = ref({});
+      const webForm = reactive({ host: "", port: 7400, err: "", busy: false });
+      const splitListen = (l) => { const i = (l || "").lastIndexOf(":"); return i < 0 ? ["", +l || 7400] : [l.slice(0, i).replace(/^\[|\]$/g, ""), +l.slice(i + 1)]; };
+      const joinListen = (h, p) => (h.includes(":") ? "[" + h + "]" : h) + ":" + p;
+      async function loadWeb() {
+        webInfo.value = await api("/api/web");
+        [webForm.host, webForm.port] = splitListen(webInfo.value.listen);
+      }
+      const webChanged = computed(() => webInfo.value.listen !== undefined && joinListen(webForm.host, webForm.port) !== webInfo.value.listen);
+      async function saveWeb() {
+        webForm.err = "";
+        const p = webForm.port;
+        if (!Number.isInteger(p) || p < 1 || p > 65535) return (webForm.err = "端口需要在 1–65535 之间");
+        const host = webForm.host || "0.0.0.0";
+        if (!["0.0.0.0", "::", "127.0.0.1", "::1", "localhost"].includes(host) && !confirm("只监听 " + host + "，确认这是本机的地址？填错会导致网页打不开（可用 xrpanel set-listen 改回）")) return;
+        webForm.busy = true;
+        try {
+          const r = await api("/api/web", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ listen: joinListen(host, p) }) });
+          toast(r.ok + "，正在跳转…");
+          const target = ["0.0.0.0", "::", ""].includes(host) ? location.hostname : host;
+          const hostPart = target.includes(":") && !target.startsWith("[") ? "[" + target + "]" : target;
+          setTimeout(() => { location.href = "https://" + hostPart + ":" + p + "/" + location.hash; }, 1200);
+        } catch (e) { webForm.err = e.message; webForm.busy = false; }
       }
       async function doLogin() {
         loginForm.busy = true; loginForm.err = "";
@@ -583,7 +609,7 @@
       setInterval(() => { if (!document.hidden) poll(); }, 2000);
 
       return {
-        auth, loginForm, pwForm, doLogin, doLogout, changePassword,
+        auth, loginForm, pwForm, doLogin, doLogout, changePassword, webInfo, webForm, webChanged, saveWeb,
         pages, page, go, navOpen, status, cfg, draft, logs, logbox, saving, hover, toasts, encAuth, encMode, srvEdit, outEdit, snip, fps: FPS,
         tiles, chart, rateNow, chartSel, chartTip, plotEl, chartHover, tipView, healthRows, topo, changes, dirty, changeCount,
         sv, srvState, srvRate, outStat, stateText, stateBadge, netLabel,

@@ -1,25 +1,21 @@
-package main
+package xray
 
-// 连接状态追踪：
-//  1. 替换 Xray 的系统拨号器（internet.UseAlternativeSystemDialer）。
-//     反向连接的上下文里带着入站 tag = 该服务端的 reverse tag，据此区分流量属于哪个服务端；
-//     出站 tag 为 direct-N 的是“连本地服务”，其余是“连服务端的隧道”。
-//  2. 接管 Xray 日志（log.RegisterHandler），识别反向控制通道建立事件，并保留最近日志给网页。
+// 连接状态追踪：替换 Xray 的系统拨号器（internet.UseAlternativeSystemDialer）。
+// 反向连接的上下文里带着入站 tag = 该服务端的 reverse tag，据此区分流量属于哪个服务端；
+// 出站 tag 为 direct-N 的是“连本地服务”，其余是“连服务端的隧道”。
 // 反向代理走 Mux，本来就不会 splice，所以用 stat.CounterConnection 包一层不影响性能。
 // 所有累计值自程序启动起计算，重载配置不清零。
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	clog "github.com/xtls/xray-core/common/log"
+	"github.com/tcpqueue/xrayclient-reversepanel/internal/config"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/transport/internet"
@@ -122,34 +118,41 @@ type tracker struct {
 
 	tunnelConns   [32]net.Conn // 最近的隧道连接，重载时主动关闭，防止旧连接残留
 	tunnelConnIdx int
-
-	started time.Time
 }
 
-var stats = newTracker()
+var stats = &tracker{servers: map[string]*serverStat{}, targets: map[string]*targetStat{}}
 
-func newTracker() *tracker {
-	return &tracker{servers: map[string]*serverStat{}, targets: map[string]*targetStat{}, started: time.Now()}
+func (t *tracker) newServerStat(name, tag string) *serverStat {
+	ss := &serverStat{Name: name, Tag: tag}
+	ss.rx.parent, ss.tx.parent = &t.totalRx, &t.totalTx
+	ss.rx.last = &ss.lastRx
+	t.servers[tag] = ss
+	return ss
 }
 
-// setServers 在每次（重新）启动内核时调用；同 tag 的服务端保留累计值。
-func (t *tracker) setServers(list []ServerConfig) {
+// SetServers 在每次（重新）启动内核前调用；同 tag 的服务端保留累计值，已删除的服务端丢弃。
+func SetServers(list []config.ServerConfig) {
+	t := stats
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.order = t.order[:0]
+	keep := map[string]bool{}
 	for _, s := range list {
-		tag := s.localTag()
+		tag := s.LocalTag()
+		keep[tag] = true
 		ss := t.servers[tag]
 		if ss == nil {
-			ss = &serverStat{}
-			ss.rx.parent, ss.tx.parent = &t.totalRx, &t.totalTx
-			ss.rx.last = &ss.lastRx
-			t.servers[tag] = ss
+			ss = t.newServerStat(s.Name, tag)
 		}
 		ss.Name, ss.Tag, ss.Addr, ss.Security, ss.Disabled = s.Name, tag, s.Server, s.Security, s.Disabled
 		ss.reverseUpAt, ss.lastDialOK, ss.lastErr = time.Time{}, time.Time{}, ""
 		ss.lastRx.Store(0)
 		t.order = append(t.order, tag)
+	}
+	for tag := range t.servers {
+		if !keep[tag] {
+			delete(t.servers, tag) // 仍在关闭中的连接持有的是 *serverStat 指针，不受影响
+		}
 	}
 	t.lastErr = ""
 }
@@ -206,7 +209,7 @@ func (d *trackingDialer) Dial(ctx context.Context, src net.Address, dest net.Des
 	now := time.Now()
 	t := stats
 
-	if strings.HasPrefix(outTag, "direct-") || outTag == "block" {
+	if strings.HasPrefix(outTag, "direct-") {
 		return t.dialTarget(inTag, dest, conn, err, now)
 	}
 
@@ -214,10 +217,7 @@ func (d *trackingDialer) Dial(ctx context.Context, src net.Address, dest net.Des
 	t.mu.Lock()
 	ss := t.servers[inTag]
 	if ss == nil { // 理论上不会发生；兜底记到一个匿名条目，避免丢统计
-		ss = &serverStat{Name: inTag, Tag: inTag}
-		ss.rx.parent, ss.tx.parent = &t.totalRx, &t.totalTx
-		ss.rx.last = &ss.lastRx
-		t.servers[inTag] = ss
+		ss = t.newServerStat(inTag, inTag)
 	}
 	ss.dials++
 	if err != nil {
@@ -293,103 +293,6 @@ func (t *tracker) dialTarget(inTag string, dest net.Destination, conn net.Conn, 
 	return &stat.CounterConnection{Connection: hook, ReadCounter: &ts.rx, WriteCounter: &ts.tx}, nil
 }
 
-// ---------------- 日志 ----------------
-
-type logHandler struct {
-	level atomic.Int32 // 输出到控制台/网页的级别；-1 = 不输出
-	mu    sync.Mutex
-	ring  [200]string
-	pos   int
-	full  bool
-}
-
-var logs = &logHandler{}
-
-// Severity 返回给 Xray 的过滤级别：至少 Info，这样才能收到反向通道建立的事件。
-func (h *logHandler) Severity() clog.Severity {
-	if l := clog.Severity(h.level.Load()); l > clog.Severity_Info {
-		return l
-	}
-	return clog.Severity_Info
-}
-
-func (h *logHandler) Handle(msg clog.Message) {
-	s := msg.String()
-	sev := clog.Severity_Info
-	if gm, ok := msg.(*clog.GeneralMessage); ok {
-		sev = gm.Severity
-	}
-	// 反向控制通道：服务端 portal 建立 mux 后会先发一个到 udp:reverse:0 的控制连接。
-	// 日志里没有服务端信息：控制消息刚从某条隧道读进来，紧接着就打出这行日志，
-	// 所以归给“最近一次收到数据”的那个服务端。
-	if strings.Contains(s, "received request for udp:reverse:0") {
-		stats.mu.Lock()
-		var best *serverStat
-		for _, ss := range stats.servers {
-			if len(ss.conns) > 0 && (best == nil || ss.lastRx.Load() > best.lastRx.Load()) {
-				best = ss
-			}
-		}
-		if best != nil {
-			best.reverseUpAt = time.Now()
-		}
-		stats.mu.Unlock()
-	}
-	if sev <= clog.Severity_Warning && (strings.Contains(s, "REALITY") || strings.Contains(s, "proxy/vless/outbound")) {
-		stats.mu.Lock()
-		stats.lastErr, stats.lastErrAt = s, time.Now()
-		stats.mu.Unlock()
-	}
-	lvl := h.level.Load()
-	if lvl < 0 || int32(sev) > lvl {
-		return
-	}
-	line := time.Now().Format("2006/01/02 15:04:05 ") + s
-	fmt.Fprintln(os.Stderr, line)
-	h.mu.Lock()
-	h.ring[h.pos] = line
-	h.pos = (h.pos + 1) % len(h.ring)
-	if h.pos == 0 {
-		h.full = true
-	}
-	h.mu.Unlock()
-}
-
-func (h *logHandler) recent() []string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make([]string, 0, len(h.ring)) // 空时返回 [] 而不是 null
-	if h.full {
-		out = append(out, h.ring[h.pos:]...)
-	}
-	out = append(out, h.ring[:h.pos]...)
-	return out
-}
-
-func setLogLevel(s string) error {
-	l := int32(clog.Severity_Warning)
-	switch strings.ToLower(s) {
-	case "debug":
-		l = int32(clog.Severity_Debug)
-	case "info":
-		l = int32(clog.Severity_Info)
-	case "", "warning":
-	case "error":
-		l = int32(clog.Severity_Error)
-	case "none":
-		l = -1
-	default:
-		return fmt.Errorf(`"logLevel" 无效: %s`, s)
-	}
-	logs.level.Store(l)
-	return nil
-}
-
-func installHooks() {
-	internet.UseAlternativeSystemDialer(&trackingDialer{inner: &internet.DefaultSystemDialer{}})
-	clog.RegisterHandler(logs)
-}
-
 // ---------------- 快照（给网页） ----------------
 
 type ServerView struct {
@@ -424,26 +327,18 @@ type TargetView struct {
 	Tx       int64  `json:"tx"`
 }
 
-type StatusView struct {
-	State       string                `json:"state"` // online / partial / connecting / offline / stopped
-	Detail      string                `json:"detail"`
-	Servers     []ServerView          `json:"servers"`
-	Targets     []TargetView          `json:"targets"`
-	Rx          int64                 `json:"rx"` // 全部隧道累计
-	Tx          int64                 `json:"tx"`
-	Active      int64                 `json:"active"` // 全部本地服务当前 TCP 连接
-	Conns       int64                 `json:"conns"`  // 全部本地服务累计连接
-	LastErr     string                `json:"lastErr"`
-	LastErrAt   int64                 `json:"lastErrAt"`
-	Uptime      int64                 `json:"uptime"`
-	Version     string                `json:"version"`
-	RssMB       float64               `json:"rssMB"` // 进程实际占用（Linux /proc/self/statm），其他系统为 0
-	HeapMB      float64               `json:"heapMB"`
-	SysMB       float64               `json:"sysMB"`
-	Goroutines  int                   `json:"goroutines"`
-	MaxProcs    int                   `json:"maxProcs"`
-	Health      map[string]HealthView `json:"health"` // key: 出站名称（或目标）
-	CoreRunning bool                  `json:"coreRunning"`
+type Snapshot struct {
+	State       string       `json:"state"` // online / partial / connecting / offline / stopped
+	Detail      string       `json:"detail"`
+	Servers     []ServerView `json:"servers"`
+	Targets     []TargetView `json:"targets"`
+	Rx          int64        `json:"rx"` // 全部隧道累计
+	Tx          int64        `json:"tx"`
+	Active      int64        `json:"active"` // 全部本地服务当前 TCP 连接
+	Conns       int64        `json:"conns"`  // 全部本地服务累计连接
+	LastErr     string       `json:"lastErr"`
+	LastErrAt   int64        `json:"lastErrAt"`
+	CoreRunning bool         `json:"coreRunning"`
 }
 
 func ms(t time.Time) int64 {
@@ -453,19 +348,25 @@ func ms(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-func (t *tracker) snapshot(running bool, cfg *Config) StatusView {
+// TakeSnapshot 返回当前连接状态。
+func TakeSnapshot(running bool, cfg *config.Config) Snapshot {
+	t := stats
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	v := StatusView{
+	v := Snapshot{
 		Servers: []ServerView{}, Targets: []TargetView{}, // 空时返回 [] 而不是 null
 		Rx: t.totalRx.Value(), Tx: t.totalTx.Value(),
 		LastErr: t.lastErr, LastErrAt: ms(t.lastErrAt), CoreRunning: running,
 	}
 	online, enabled := 0, 0
+	now := time.Now()
 	for _, tag := range t.order {
 		ss := t.servers[tag]
+		if ss == nil {
+			continue
+		}
 		sv := ServerView{Name: ss.Name, Tag: ss.Tag, Addr: ss.Addr, Security: ss.Security,
-			Since: ms(ss.reverseUpAt), Tunnels: ss.liveTunnels(time.Now()), Dials: ss.dials, Fails: ss.fails,
+			Since: ms(ss.reverseUpAt), Tunnels: ss.liveTunnels(now), Dials: ss.dials, Fails: ss.fails,
 			LastErr: ss.lastErr, LastErrAt: ms(ss.lastErrAt), Rx: ss.rx.Value(), Tx: ss.tx.Value()}
 		lastRx := time.Unix(0, ss.lastRx.Load())
 		if ss.lastRx.Load() != 0 {
@@ -476,15 +377,15 @@ func (t *tracker) snapshot(running bool, cfg *Config) StatusView {
 			sv.State, sv.Detail = "disabled", "已停用"
 		case !running:
 			sv.State, sv.Detail = "stopped", "内核未运行"
-		case !ss.reverseUpAt.IsZero() && sv.Tunnels > 0 && time.Since(lastRx) < 30*time.Second:
+		case !ss.reverseUpAt.IsZero() && sv.Tunnels > 0 && now.Sub(lastRx) < 30*time.Second:
 			// 服务端心跳约 10 秒一次，30 秒内收到过数据即认为在线
 			sv.State, sv.Detail = "online", "反向隧道已建立"
-		case sv.Tunnels > 0 && time.Since(ss.lastDialOK) < 15*time.Second:
+		case sv.Tunnels > 0 && now.Sub(ss.lastDialOK) < 15*time.Second:
 			sv.State, sv.Detail = "connecting", "TCP 已连上，等待服务端建立反向通道"
 		case ss.dials == 0:
 			sv.State, sv.Detail = "connecting", "正在连接服务端"
 		default:
-			sv.State, sv.Detail = "offline", "未连上或认证失败，请检查地址、UUID、tag、REALITY/encryption 参数"
+			sv.State, sv.Detail = "offline", "未连上或认证失败，请检查地址、UUID、REALITY/encryption 参数"
 		}
 		if !ss.Disabled {
 			enabled++
@@ -514,7 +415,7 @@ func (t *tracker) snapshot(running bool, cfg *Config) StatusView {
 		}
 		v.Conns += tv.Dials
 		if cfg != nil {
-			tv.Name = cfg.nameFor(ts.Addr)
+			tv.Name = cfg.NameFor(ts.Addr)
 		}
 		v.Targets = append(v.Targets, tv)
 	}
@@ -525,18 +426,4 @@ func (t *tracker) snapshot(running bool, cfg *Config) StatusView {
 		return v.Targets[i].Addr < v.Targets[j].Addr
 	})
 	return v
-}
-
-// rssBytes 读取进程常驻内存（RSS），与 top/ps 看到的一致；非 Linux 返回 0。
-func rssBytes() uint64 {
-	b, err := os.ReadFile("/proc/self/statm")
-	if err != nil {
-		return 0
-	}
-	f := strings.Fields(string(b))
-	if len(f) < 2 {
-		return 0
-	}
-	pages, _ := strconv.ParseUint(f[1], 10, 64)
-	return pages * uint64(os.Getpagesize())
 }

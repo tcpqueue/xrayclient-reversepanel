@@ -4,14 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xrayclient-reversepanel</title>
-<script>
-  // 跟随系统亮/暗色
-  (function () {
-    var m = window.matchMedia('(prefers-color-scheme: dark)');
-    var set = function () { document.documentElement.setAttribute('data-bs-theme', m.matches ? 'dark' : 'light'); };
-    set(); m.addEventListener('change', set);
-  })();
-</script>
+<script src="theme.js"></script>
 <link rel="stylesheet" href="vendor/bootstrap.css">
 <link rel="stylesheet" href="app.css">
 </head>
@@ -28,7 +21,7 @@
         <div class="mb-3"><label class="form-label">密码</label><input class="form-control" type="password" v-model="loginForm.password" autocomplete="current-password"></div>
         <div v-if="loginForm.err" class="alert alert-danger py-2 small">{{ loginForm.err }}</div>
         <button class="btn btn-primary w-100" :disabled="loginForm.busy">{{ loginForm.busy ? '登录中…' : '登录' }}</button>
-        <div class="form-text text-center mt-3">默认账号密码 admin / admin，登录后请在“系统”页修改</div>
+        <div class="form-text text-center mt-3">初始账号密码见安装时的输出，或在服务器上运行 <code>xrpanel info</code> 查看</div>
       </div>
     </form>
   </div>
@@ -321,11 +314,33 @@
               <span class="form-text ms-2">立即生效，其他已登录的会话会被退出</span>
             </form>
           </div>
+          <div class="card mb-3">
+            <div class="card-header fw-semibold">管理网页</div>
+            <form class="card-body" @submit.prevent="saveWeb">
+              <div class="row g-3">
+                <div class="col-sm-7"><label class="form-label">监听地址</label>
+                  <input class="form-control" v-model.trim="webForm.host" placeholder="0.0.0.0">
+                  <div class="form-text">0.0.0.0 = 全部 IPv4；:: = 全部 IPv4+IPv6；127.0.0.1 = 仅本机</div></div>
+                <div class="col-sm-5"><label class="form-label">端口</label>
+                  <input class="form-control" type="number" min="1" max="65535" v-model.number="webForm.port"></div>
+              </div>
+              <div v-if="webInfo.docker" class="alert alert-warning py-2 small mt-3 mb-0">运行在 Docker 中：改端口后还需要同步修改端口映射（host 网络模式除外）。</div>
+              <div v-if="webForm.err" class="alert alert-danger py-2 small mt-3 mb-0">{{ webForm.err }}</div>
+              <button class="btn btn-primary mt-3" :disabled="webForm.busy || !webChanged">保存并切换</button>
+              <span class="form-text ms-2">立即生效，页面会自动跳转到新地址</span>
+              <div class="small mt-3" v-if="webInfo.cert">
+                <div class="kv"><span>HTTPS 证书</span><b>{{ webInfo.cert.selfSigned ? '自签名' : '自定义' }}，有效期至 {{ new Date(webInfo.cert.notAfter).toLocaleDateString() }}</b></div>
+                <div class="kv"><span>证书包含</span><b class="text-break">{{ (webInfo.cert.names || []).join(', ') }}</b></div>
+                <div class="kv"><span>SHA256 指纹</span><b class="text-break font-monospace" style="font-size:.75em">{{ webInfo.cert.sha256 }}</b></div>
+                <div class="form-text">浏览器提示“不安全”是因为证书是自签名的，核对指纹一致即可放心继续。换了 IP 后可运行 <code>xrpanel gen-cert</code> 重新生成。</div>
+              </div>
+            </form>
+          </div>
           <div class="card">
             <div class="card-header fw-semibold">关于</div>
             <div class="card-body small">
+              <div class="kv"><span>程序版本</span><b>{{ status.appVersion }}</b></div>
               <div class="kv"><span>Xray-core</span><b>{{ status.version }}</b></div>
-              <div class="kv"><span>管理网页监听</span><b>由配置文件 web.listen 决定，网页中不可修改</b></div>
               <div class="kv"><span>前端</span><b>Vue 3.5.13 · Bootstrap 5.3.3（MIT）</b></div>
             </div>
           </div>

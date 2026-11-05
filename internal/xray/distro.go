@@ -1,4 +1,4 @@
-package main
+package xray
 
 // 只注册反向代理客户端真正用到的模块。
 // 官方完整版在 main/distro/all/all.go 里导入了全部协议/传输/JSON 加载器，

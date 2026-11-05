@@ -1,4 +1,4 @@
-package main
+package panel
 
 // 管理网页登录：账号密码（默认 admin / admin）+ 会话 Cookie。
 // 密码以 PBKDF2-SHA256 加盐哈希保存在配置的 web.passwordHash 中；
@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tcpqueue/xrayclient-reversepanel/internal/config"
 )
 
 const (
@@ -41,7 +43,7 @@ type failInfo struct {
 	until time.Time
 }
 
-func newAuth(wc *WebConfig) *authState {
+func newAuth(wc *config.WebConfig) *authState {
 	a := &authState{sessions: map[string]time.Time{}, fails: map[string]*failInfo{}}
 	a.user = wc.User
 	if a.user == "" {
@@ -53,13 +55,14 @@ func newAuth(wc *WebConfig) *authState {
 	case wc.Password != "":
 		a.plain = wc.Password
 	default:
-		a.hash = hashPassword(defaultPassword)
+		a.hash = HashPassword(defaultPassword)
 		a.isDefault = true
 	}
 	return a
 }
 
-func hashPassword(pw string) string {
+// HashPassword 生成 web.passwordHash 使用的 PBKDF2-SHA256 哈希。
+func HashPassword(pw string) string {
 	salt := make([]byte, 16)
 	rand.Read(salt)
 	key, _ := pbkdf2.Key(sha256.New, pw, salt, pbkdf2Iter, 32)
@@ -108,16 +111,23 @@ func (a *authState) login(ip, user, pw string) (string, error) {
 
 	if !a.verify(user, pw) {
 		a.mu.Lock()
-		if len(a.fails) > 256 {
-			a.fails = map[string]*failInfo{}
+		if len(a.fails) >= 1024 {
+			now := time.Now()
+			for k, v := range a.fails {
+				if now.After(v.until) {
+					delete(a.fails, k)
+				}
+			}
 		}
-		if f = a.fails[ip]; f == nil {
+		if f = a.fails[ip]; f == nil && len(a.fails) < 1024 {
 			f = &failInfo{}
 			a.fails[ip] = f
 		}
-		f.n++
-		if f.n >= 5 {
-			f.n, f.until = 0, time.Now().Add(time.Minute)
+		if f != nil {
+			f.n++
+			if f.n >= 5 {
+				f.n, f.until = 0, time.Now().Add(time.Minute)
+			}
 		}
 		a.mu.Unlock()
 		time.Sleep(500 * time.Millisecond)
@@ -189,7 +199,7 @@ func (a *authState) change(keepTok, oldPw, newUser, newPw string) (user, hash st
 	if newPw == defaultPassword {
 		return "", "", fmt.Errorf("新密码不能是默认密码")
 	}
-	h := hashPassword(newPw)
+	h := HashPassword(newPw)
 	a.mu.Lock()
 	a.user, a.hash, a.plain, a.isDefault = newUser, h, "", false
 	for k := range a.sessions {

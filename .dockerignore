@@ -1,0 +1,8 @@
+.git
+.github
+dist
+*.exe
+*.exe~
+config.json
+*.tmp
+data

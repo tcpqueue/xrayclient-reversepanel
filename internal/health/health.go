@@ -1,14 +1,12 @@
-package main
-
-// 出站对象（本地服务）健康检测：TCP / UDP / HTTP / HTTPS。
-// 检测直接从本机拨号到本地服务，不经过 Xray，也不使用系统代理。
+// Package health 检测本地服务（出站对象）是否可用：TCP / UDP / HTTP / HTTPS。
+// 检测直接从本机拨号到本地服务，不经过 Xray，也不使用系统代理。本包不引用 xray-core。
+package health
 
 import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	stdnet "net"
 	"net/http"
@@ -17,75 +15,15 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tcpqueue/xrayclient-reversepanel/internal/config"
 )
 
-type HealthConfig struct {
-	Enabled     bool   `json:"enabled"`
-	Type        string `json:"type"`                  // tcp | udp | http | https
-	Target      string `json:"target,omitempty"`      // host:port；留空时使用出站目标（需为单个 IP:端口）
-	Path        string `json:"path,omitempty"`        // http(s) 路径，默认 /
-	Insecure    bool   `json:"insecure,omitempty"`    // https 忽略证书校验
-	AnyStatus   bool   `json:"anyStatus,omitempty"`   // http(s) 任何状态码都算正常（否则 < 400 才算）
-	Interval    int    `json:"interval,omitempty"`    // 秒，默认 30，最小 5
-	Timeout     int    `json:"timeout,omitempty"`     // 秒，默认 5
-	Payload     string `json:"payload,omitempty"`     // udp 探测内容；以 hex: 开头表示十六进制
-	ExpectReply bool   `json:"expectReply,omitempty"` // udp 必须收到回复才算正常
-}
-
-const healthHistory = 30
-
-// healthTarget 返回实际检测地址。
-func (a *AllowEntry) healthTarget() (string, error) {
-	h := a.Health
-	if h.Target != "" {
-		if _, _, err := stdnet.SplitHostPort(h.Target); err != nil {
-			return "", fmt.Errorf(`出站 %q 的检测地址需要 host:端口`, outKeyOf(*a))
-		}
-		return h.Target, nil
-	}
-	t := strings.TrimSpace(a.Target)
-	host, port, err := stdnet.SplitHostPort(t)
-	if err != nil || strings.Contains(host, "/") || strings.Contains(port, "-") {
-		return "", fmt.Errorf(`出站 %q 是网段或端口范围，请在健康检测里指定一个检测地址`, outKeyOf(*a))
-	}
-	return t, nil
-}
-
-func (h *HealthConfig) validate(a *AllowEntry) error {
-	switch h.Type {
-	case "tcp", "udp", "http", "https":
-	default:
-		return fmt.Errorf(`出站 %q 的检测类型只能是 tcp/udp/http/https`, outKeyOf(*a))
-	}
-	if _, err := a.healthTarget(); err != nil {
-		return err
-	}
-	if h.Interval != 0 && h.Interval < 5 {
-		return fmt.Errorf(`出站 %q 的检测间隔不能小于 5 秒`, outKeyOf(*a))
-	}
-	if h.Timeout < 0 || h.Timeout > 60 {
-		return fmt.Errorf(`出站 %q 的检测超时需在 1–60 秒`, outKeyOf(*a))
-	}
-	if strings.HasPrefix(h.Payload, "hex:") {
-		if _, err := hex.DecodeString(strings.TrimPrefix(h.Payload, "hex:")); err != nil {
-			return fmt.Errorf(`出站 %q 的 UDP 探测内容不是有效的十六进制`, outKeyOf(*a))
-		}
-	}
-	return nil
-}
-
-func outKeyOf(a AllowEntry) string {
-	if a.Name != "" {
-		return a.Name
-	}
-	return a.Target
-}
-
-// ---------------- 检测结果 ----------------
+const healthHistory = 30 // 每个本地服务保留最近多少次结果
 
 type healthState struct {
 	mu        sync.Mutex
-	cfg       HealthConfig
+	cfg       config.HealthConfig
 	target    string
 	status    string // pending | up | down
 	latencyMs int64
@@ -96,7 +34,7 @@ type healthState struct {
 	history   []int64 // 最近若干次：延迟毫秒；失败为 -1
 }
 
-type HealthView struct {
+type View struct {
 	Type      string  `json:"type"`
 	Target    string  `json:"target"`
 	Status    string  `json:"status"`
@@ -115,10 +53,16 @@ type healthManager struct {
 	states map[string]*healthState // key: 出站名称（或目标）
 }
 
-var health = &healthManager{states: map[string]*healthState{}}
+var mgr = &healthManager{states: map[string]*healthState{}}
+
+// Apply 按新的出站列表重启检测任务（配置没变的检测保留历史）。
+func Apply(allow []config.AllowEntry) { mgr.apply(allow) }
+
+// Snapshot 返回各本地服务的检测结果，key 为出站名称（或目标）。
+func Snapshot() map[string]View { return mgr.snapshot() }
 
 // apply 按新的出站列表重启检测任务；配置没变的检测保留历史。
-func (m *healthManager) apply(allow []AllowEntry) {
+func (m *healthManager) apply(allow []config.AllowEntry) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cancel != nil {
@@ -133,11 +77,11 @@ func (m *healthManager) apply(allow []AllowEntry) {
 		if a.Health == nil || !a.Health.Enabled {
 			continue
 		}
-		target, err := a.healthTarget()
+		target, err := a.HealthTarget()
 		if err != nil {
 			continue
 		}
-		key := outKeyOf(a)
+		key := a.Key()
 		st := old[key]
 		if st == nil || st.cfg != *a.Health || st.target != target {
 			st = &healthState{status: "pending"}
@@ -148,13 +92,13 @@ func (m *healthManager) apply(allow []AllowEntry) {
 	}
 }
 
-func (m *healthManager) snapshot() map[string]HealthView {
+func (m *healthManager) snapshot() map[string]View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make(map[string]HealthView, len(m.states))
+	out := make(map[string]View, len(m.states))
 	for k, st := range m.states {
 		st.mu.Lock()
-		out[k] = HealthView{Type: st.cfg.Type, Target: st.target, Status: st.status, LatencyMs: st.latencyMs,
+		out[k] = View{Type: st.cfg.Type, Target: st.target, Status: st.status, LatencyMs: st.latencyMs,
 			LastCheck: ms(st.lastCheck), LastErr: st.lastErr, Fails: st.fails,
 			History: append([]int64{}, st.history...), Interval: st.interval(), NoReply: st.noReply}
 		st.mu.Unlock()
@@ -327,4 +271,11 @@ func shortErr(err error) error {
 		return errors.New("目标不是 HTTPS 服务")
 	}
 	return err
+}
+
+func ms(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixMilli()
 }
