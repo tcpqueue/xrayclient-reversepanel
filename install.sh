@@ -533,6 +533,28 @@ cmd_info() {
 	if [ "$(cur_listen | cut -d: -f1)" = "0.0.0.0" ] || [ "$(cur_listen | cut -c1-3)" = "[::" ]; then
 		echo "提示:        浏览器会提示证书不安全（自签名），核对上面的指纹后继续即可"
 	fi
+	firewall_hint
+}
+
+# 本机防火墙没放行网页端口时给出提示（只提示，不自动修改防火墙）
+firewall_hint() {
+	_l=$(cur_listen)
+	_fp=${_l##*:}
+	case "${_l%:*}" in 127.0.0.1|localhost|"[::1]") return 0 ;; esac
+	[ -n "$_fp" ] || return 0
+	_cmd=""
+	if has ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
+		ufw status 2>/dev/null | grep -qE "^$_fp(/tcp)?[[:space:]]" ||
+			_cmd="ufw allow $_fp/tcp      （只允许局域网：ufw allow from 192.168.0.0/16 to any port $_fp proto tcp）"
+	elif has firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+		firewall-cmd --list-ports 2>/dev/null | grep -qw "$_fp/tcp" ||
+			_cmd="firewall-cmd --permanent --add-port=$_fp/tcp && firewall-cmd --reload"
+	fi
+	[ -z "$_cmd" ] && return 0
+	warn "本机防火墙没有放行网页端口 $_fp，其他设备打不开管理网页。放行方法："
+	echo "    $_cmd"
+	[ -d /www/server/panel ] && echo "    或在宝塔面板「安全」页添加端口 $_fp"
+	return 0
 }
 
 state_text() {
@@ -616,6 +638,7 @@ cmd_set_listen() {
 	fi
 	"$BIN" set-listen -c "$CONF" "$_addr" || exit 1
 	restart_service
+	firewall_hint
 }
 
 cmd_gen_cert() {
