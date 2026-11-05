@@ -90,7 +90,7 @@
           <div v-else class="topo-wrap" ref="topoWrap" @mouseleave="hover = null; tip = null">
           <svg class="topo" :viewBox="'0 0 ' + topo.w + ' ' + topo.h" :style="{ maxHeight: topo.h * 1.2 + 'px' }">
             <text class="col-title" :x="topo.cols[0] + topo.nw / 2" y="18">出站对象（本地服务）</text>
-            <text class="col-title" :x="topo.cols[1] + topo.nw / 2" y="18">xrayclient-reversepanel 本体</text>
+            <text class="col-title" :x="topo.cols[1] + topo.nw / 2" y="18">本机客户端</text>
             <text class="col-title" :x="topo.cols[2] + topo.nw / 2" y="18">服务端</text>
             <text class="col-title" :x="topo.cols[3] + topo.nw / 2" y="18">服务端入口</text>
 
@@ -103,8 +103,8 @@
                :transform="'translate(' + n.x + ',' + n.y + ')'" @mouseenter="hover = n.chain" @mousemove="showTip($event, n.id)" @click="openNode(n)">
               <rect :width="topo.nw" :height="topo.nh" rx="8"></rect>
               <circle class="dot" cx="14" :cy="topo.nh / 2" r="5"></circle>
-              <text class="n1" x="26" y="19">{{ n.l1 }}</text>
-              <text class="n2" x="26" y="36">{{ n.l2 }}</text>
+              <text class="n1" x="26" y="19">{{ fitText(n.l1, topo.nw - 34, 13) }}</text>
+              <text class="n2" x="26" y="36">{{ fitText(n.l2, topo.nw - 34, 11) }}</text>
             </g>
           </svg>
           <!-- 悬停信息：跟随鼠标，内容随 2 秒刷新实时更新 -->

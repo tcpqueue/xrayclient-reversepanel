@@ -19,6 +19,16 @@
   const netLabel = (n) => NETS[netNorm(n)] || "TCP";
   const hostOf = (addr) => { const i = (addr || "").lastIndexOf(":"); return i > 0 ? addr.slice(0, i) : (addr || "?"); };
   const outKey = (a) => a.name || a.target;
+  // SVG 文字不会自动截断：按估算宽度（中日韩字符 ≈ 1em，其他 ≈ 0.62em）截断并加省略号，完整内容看悬停提示
+  const fitText = (s, maxPx, fs) => {
+    s = String(s == null ? "" : s);
+    let w = 0;
+    for (let i = 0; i < s.length; i++) {
+      w += (s.charCodeAt(i) >= 0x2e80 ? 1 : 0.62) * fs;
+      if (w > maxPx) return s.slice(0, Math.max(0, i - 1)) + "…";
+    }
+    return s;
+  };
 
   // 登录状态：任何接口返回 401 都回到登录页
   const auth = reactive({ checked: false, loggedIn: false, user: "", defaultPassword: false });
@@ -286,7 +296,7 @@
         });
       });
 
-      // ---------- 拓扑图（使用已生效的配置）：出站对象 → xrayclient-reversepanel 本体 → 服务端 → 服务端入口 ----------
+      // ---------- 拓扑图（使用已生效的配置）：出站对象 → 本机客户端 → 服务端 → 服务端入口 ----------
       const hv = (a) => (status.value.health || {})[outKey(a)] || null;
       // 出站对象 ↔ 本体 这段链路：健康检测失败 = 断线；有流量 = 传输中；检测正常 = 空闲；没开检测又没数据 = 未监测
       function outLink(a) {
@@ -374,9 +384,9 @@
 
         // xrayclient-reversepanel 本体
         const coreChain = chains["core"] || new Set(["core"]);
-        nodes.push({ id: "core", kind: "core", state: s0.state || "stopped", x: cols[1], y: yc - NH / 2, l1: "xrayclient-reversepanel 本体",
+        nodes.push({ id: "core", kind: "core", state: s0.state || "stopped", x: cols[1], y: yc - NH / 2, l1: "本机客户端",
           l2: `${s0.rssMB ? s0.rssMB + " MB" : (s0.sysMB || 0) + " MB"} · 连接 ${s0.active ?? 0}`,
-          tip: { title: "xrayclient-reversepanel 本体", state: s0.state === "online" ? "idle" : s0.state === "stopped" ? "disabled" : "down", stateText: stateText(s0.state) + (s0.detail ? "：" + s0.detail : ""),
+          tip: { title: "本机客户端", state: s0.state === "online" ? "idle" : s0.state === "stopped" ? "disabled" : "down", stateText: stateText(s0.state) + (s0.detail ? "：" + s0.detail : ""),
             lines: [`实时 上传 ${fmtRate(rates.total.up)} / 下载 ${fmtRate(rates.total.down)}`, `累计 上传 ${fmtBytes(s0.tx)} / 下载 ${fmtBytes(s0.rx)}`,
               `内存 ${s0.rssMB || s0.sysMB || 0} MB · Go 堆 ${s0.heapMB ?? 0} MB · 协程 ${s0.goroutines ?? 0}`, `CPU 线程 ${s0.maxProcs ?? "-"} · 运行 ${fmtDur(s0.uptime)}`] },
           chain: coreChain, ref: { type: "core" } });
@@ -613,7 +623,7 @@
         pages, page, go, navOpen, status, cfg, draft, logs, logbox, saving, hover, toasts, encAuth, encMode, srvEdit, outEdit, snip, fps: FPS,
         tiles, chart, rateNow, chartSel, chartTip, plotEl, chartHover, tipView, healthRows, topo, changes, dirty, changeCount,
         sv, srvState, srvRate, outStat, stateText, stateBadge, netLabel,
-        fmtBytes, fmtRate, fmtDur, ago, gen, copy, toast,
+        fmtBytes, fmtRate, fmtDur, ago, gen, copy, toast, fitText,
         saveApply, revert, restart, openNode, tip, topoWrap, showTip, tipItem,
         editServer, openImport, fillFromLink, genReality, genEnc, commitServer, removeServer, copyLink, showSnippet,
         editOutlet, commitOutlet, suggestHealth, hv, healthText, healthBadge, spark,
