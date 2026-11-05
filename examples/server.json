@@ -1,0 +1,38 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [
+    {
+      "tag": "in-lite",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": [
+          {"id": "00000000-0000-0000-0000-000000000000", "flow": "xtls-rprx-vision", "reverse": {"tag": "r-home"}},
+          {"id": "22222222-2222-2222-2222-222222222222", "flow": "xtls-rprx-vision", "reverse": {"tag": "r-office"}}
+        ]
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "target": "www.example.com:443",
+          "serverNames": ["www.example.com"],
+          "privateKey": "xray x25519 生成的 PrivateKey",
+          "shortIds": ["0123456789abcdef"]
+        }
+      }
+    },
+
+    {"tag": "home-ssh", "port": 6022, "protocol": "tunnel", "settings": {"address": "127.0.0.1", "port": 22, "network": "tcp"}},
+    {"tag": "home-nas", "port": 6050, "protocol": "tunnel", "settings": {"address": "192.168.1.10", "port": 5000, "network": "tcp"}},
+    {"tag": "office-rdp", "port": 7389, "protocol": "tunnel", "settings": {"address": "10.0.0.5", "port": 3389, "network": "tcp"}}
+  ],
+  "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+  "routing": {
+    "rules": [
+      {"inboundTag": ["home-ssh", "home-nas"], "outboundTag": "r-home"},
+      {"inboundTag": ["office-rdp"], "outboundTag": "r-office"}
+    ]
+  }
+}

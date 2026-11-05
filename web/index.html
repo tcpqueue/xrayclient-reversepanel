@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xray-lite</title>
+<script>
+  // 跟随系统亮/暗色
+  (function () {
+    var m = window.matchMedia('(prefers-color-scheme: dark)');
+    var set = function () { document.documentElement.setAttribute('data-bs-theme', m.matches ? 'dark' : 'light'); };
+    set(); m.addEventListener('change', set);
+  })();
+</script>
+<link rel="stylesheet" href="vendor/bootstrap.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app"></div>
+<script type="text/x-template" id="tpl">
+  <!-- ============ 登录页 ============ -->
+  <div v-if="auth.checked && !auth.loggedIn" class="login-wrap">
+    <form class="card login-card shadow-sm" @submit.prevent="doLogin">
+      <div class="card-body p-4">
+        <div class="brand mb-1">xray-lite</div>
+        <div class="text-body-secondary small mb-4">VLESS 反向代理客户端 · 管理登录</div>
+        <div class="mb-3"><label class="form-label">用户名</label><input class="form-control" v-model.trim="loginForm.user" autocomplete="username" autofocus></div>
+        <div class="mb-3"><label class="form-label">密码</label><input class="form-control" type="password" v-model="loginForm.password" autocomplete="current-password"></div>
+        <div v-if="loginForm.err" class="alert alert-danger py-2 small">{{ loginForm.err }}</div>
+        <button class="btn btn-primary w-100" :disabled="loginForm.busy">{{ loginForm.busy ? '登录中…' : '登录' }}</button>
+        <div class="form-text text-center mt-3">默认账号密码 admin / admin，登录后请在“系统”页修改</div>
+      </div>
+    </form>
+  </div>
+
+<template v-if="auth.loggedIn">
+
+  <!-- ============ 顶栏（LuCI bootstrap 风格） ============ -->
+  <nav class="navbar navbar-expand-md navbar-dark bg-dark sticky-top shadow-sm">
+    <div class="container-xl">
+      <a class="navbar-brand fw-semibold" href="#dashboard">xray-lite <small class="text-secondary fw-normal ms-1">{{ status.version ? 'Xray ' + status.version : '' }}</small></a>
+      <button class="navbar-toggler" type="button" @click="navOpen = !navOpen"><span class="navbar-toggler-icon"></span></button>
+      <div class="collapse navbar-collapse" :class="{ show: navOpen }">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item" v-for="p in pages" :key="p.id">
+            <a class="nav-link" :class="{ active: page === p.id }" :href="'#' + p.id" @click="navOpen = false">{{ p.title }}</a>
+          </li>
+        </ul>
+        <div class="d-flex align-items-center gap-2 py-2 py-md-0">
+          <span class="badge rounded-pill" :class="stateBadge(status.state)">{{ stateText(status.state) }}</span>
+          <button v-if="dirty" class="btn btn-warning btn-sm" @click="go('changes')">未保存的更改 <span class="badge text-bg-dark">{{ changeCount }}</span></button>
+          <button v-if="dirty" class="btn btn-primary btn-sm" :disabled="saving" @click="saveApply">{{ saving ? '正在应用…' : '保存并应用' }}</button>
+          <span class="text-secondary small ms-md-2 d-none d-md-inline">{{ auth.user }}</span>
+          <button class="btn btn-outline-light btn-sm" @click="go('system')" title="修改密码">修改密码</button>
+          <button class="btn btn-outline-light btn-sm" @click="doLogout">退出</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 提示条 -->
+  <div class="toast-stack">
+    <div v-for="t in toasts" :key="t.id" class="alert py-2 px-3 shadow-sm mb-2" :class="t.ok ? 'alert-success' : 'alert-danger'">{{ t.text }}</div>
+  </div>
+
+  <div v-if="auth.defaultPassword" class="alert alert-warning rounded-0 mb-0 py-2 text-center small">
+    正在使用默认密码 <b>admin</b>，能访问本页面的人都能登录并修改配置。<a href="#system" class="alert-link" @click="go('system')">立即修改</a>
+  </div>
+  <main class="container-xl py-3">
+
+    <!-- ============ 概览大屏 ============ -->
+    <template v-if="page === 'dashboard'">
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-4 col-xl-2" v-for="tile in tiles" :key="tile.k">
+          <div class="card tile h-100" :title="tile.tip">
+            <div class="card-body">
+              <div class="tile-k">{{ tile.k }}</div>
+              <div class="tile-v" :class="tile.cls">{{ tile.v }}</div>
+              <div class="tile-s">{{ tile.s }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header d-flex flex-wrap align-items-center gap-3">
+          <span class="fw-semibold">链路拓扑</span>
+          <span class="legend"><i class="lg busy"></i>传输中</span>
+          <span class="legend"><i class="lg idle"></i>空闲</span>
+          <span class="legend"><i class="lg down"></i>断线</span>
+          <span class="legend"><i class="lg disabled"></i>已停用</span>
+          <span class="legend"><i class="lg unknown"></i>未监测</span>
+          <span class="ms-auto small text-body-secondary">鼠标悬停查看链路详情，点击节点进入编辑</span>
+        </div>
+        <div class="card-body p-2">
+          <div v-if="!topo.outlets.length && !topo.servers.length" class="text-body-secondary p-4 text-center">还没有配置服务端和出站</div>
+          <div v-else class="topo-wrap" ref="topoWrap" @mouseleave="hover = null; tip = null">
+          <svg class="topo" :viewBox="'0 0 ' + topo.w + ' ' + topo.h" :style="{ maxHeight: topo.h * 1.2 + 'px' }">
+            <text class="col-title" :x="topo.cols[0] + topo.nw / 2" y="18">出站对象（本地服务）</text>
+            <text class="col-title" :x="topo.cols[1] + topo.nw / 2" y="18">xray-lite 本体</text>
+            <text class="col-title" :x="topo.cols[2] + topo.nw / 2" y="18">服务端</text>
+            <text class="col-title" :x="topo.cols[3] + topo.nw / 2" y="18">服务端入口</text>
+
+            <g v-for="e in topo.edges" :key="e.id">
+              <path class="edge-hit" :d="e.d" @mouseenter="hover = e.chain" @mousemove="showTip($event, e.id)"></path>
+              <path class="edge" :class="[e.state, { dim: hover && !hover.has(e.id), hot: hover && hover.has(e.id) }]" :d="e.d"></path>
+            </g>
+
+            <g v-for="n in topo.nodes" :key="n.id" class="node" :class="[n.kind, n.state, { dim: hover && !hover.has(n.id) }]"
+               :transform="'translate(' + n.x + ',' + n.y + ')'" @mouseenter="hover = n.chain" @mousemove="showTip($event, n.id)" @click="openNode(n)">
+              <rect :width="topo.nw" :height="topo.nh" rx="8"></rect>
+              <circle class="dot" cx="14" :cy="topo.nh / 2" r="5"></circle>
+              <text class="n1" x="26" y="19">{{ n.l1 }}</text>
+              <text class="n2" x="26" y="36">{{ n.l2 }}</text>
+            </g>
+          </svg>
+          <!-- 悬停信息：跟随鼠标，内容随 2 秒刷新实时更新 -->
+          <div v-if="tipItem" class="topo-tip shadow-sm" :style="{ left: tip.x + 'px', top: tip.y + 'px' }">
+            <div class="fw-semibold mb-1">{{ tipItem.title }}</div>
+            <div v-if="tipItem.stateText" class="d-flex align-items-center gap-2 mb-1"><i class="lg" :class="tipItem.state"></i>{{ tipItem.stateText }}</div>
+            <div v-for="(l, k) in tipItem.lines" :key="k" :class="{ 'text-danger': l.startsWith('最近错误') }">{{ l }}</div>
+            <div class="text-body-secondary mt-1" v-if="tipItem.hint">{{ tipItem.hint }}</div>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="card h-100">
+            <div class="card-header d-flex flex-wrap align-items-center gap-2">
+              <span class="fw-semibold">实时流量</span><span class="small text-body-secondary">最近 2 分钟 · 每 2 秒一个点</span>
+              <select class="form-select form-select-sm ms-auto w-auto" v-model="chartSel">
+                <option value="">全部服务端合计</option>
+                <option v-for="s in cfg.servers" :key="s.name" :value="s.name">{{ s.name }}</option>
+                <option v-if="cfg.servers.length > 1" value="__cmp">各服务端对比（上传+下载）</option>
+              </select>
+            </div>
+            <div class="card-body">
+              <div class="chart-box">
+                <div class="chart-y"><span v-for="t in chart.ticks" :key="t.v" :style="{ top: t.pct + '%' }">{{ t.label }}</span></div>
+                <div class="chart-plot" ref="plotEl" @mousemove="chartHover" @mouseleave="chartTip = null">
+                  <svg class="chart" viewBox="0 0 600 160" preserveAspectRatio="none">
+                    <line v-for="t in chart.ticks" :key="t.v" x1="0" x2="600" :y1="t.y" :y2="t.y" class="grid"></line>
+                    <polyline v-for="s in chart.series" :key="s.key" :points="s.points" :style="{ stroke: s.color }"></polyline>
+                    <line v-if="tipView" :x1="tipView.x" :x2="tipView.x" y1="0" y2="160" class="cursor"></line>
+                  </svg>
+                  <template v-if="tipView">
+                    <i v-for="d in tipView.dots" :key="d.key" class="chart-dot" :style="{ left: tipView.xp + '%', top: d.yp + '%', background: d.color }"></i>
+                    <div class="chart-tip shadow-sm" :style="tipView.xp > 60 ? { right: (100 - tipView.xp) + '%', marginRight: '10px' } : { left: tipView.xp + '%', marginLeft: '10px' }">
+                      <div class="fw-semibold mb-1">{{ tipView.time }}</div>
+                      <div v-for="d in tipView.dots" :key="d.key" class="d-flex align-items-center gap-2"><i class="sw" :style="{ background: d.color }"></i>{{ d.label }}<b class="ms-auto ps-3">{{ fmtRate(d.v) }}</b></div>
+                      <div v-if="tipView.down.length" class="text-danger mt-1">健康异常：{{ tipView.down.join('、') }}</div>
+                    </div>
+                  </template>
+                  <div class="chart-x"><span>2 分钟前</span><span>1 分钟前</span><span>现在</span></div>
+                </div>
+              </div>
+              <div class="d-flex flex-wrap gap-3 small mt-2">
+                <span v-for="s in chart.series" :key="s.key"><i class="sw" :style="{ background: s.color }"></i> {{ s.label }} <b>{{ fmtRate(s.now) }}</b></span>
+                <span class="ms-auto text-body-secondary">峰值 {{ fmtRate(chart.peak) }}</span>
+              </div>
+              <!-- 健康检测时间线：与上面的曲线共用时间轴 -->
+              <div v-if="healthRows.length" class="mt-3">
+                <div class="small text-body-secondary mb-1">健康检测（与曲线同一时间轴，绿色正常、红色异常、灰色检测中/无数据）</div>
+                <div v-for="r in healthRows" :key="r.key" class="hrow">
+                  <span class="hname text-truncate" :title="r.key">{{ r.key }}</span>
+                  <svg viewBox="0 0 600 10" preserveAspectRatio="none"><rect v-for="c in r.cells" :key="c.x" :x="c.x" y="0" :width="c.w" height="10" :class="c.s"></rect></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card h-100">
+            <div class="card-header fw-semibold">系统</div>
+            <div class="card-body small">
+              <div class="kv" title="进程常驻内存（RSS），与 top / ps 看到的一致"><span>实际内存 (RSS)</span><b>{{ status.rssMB ? status.rssMB + ' MB' : status.sysMB + ' MB (Go)' }}</b></div>
+              <div class="kv" title="程序中存活数据用掉的内存，是实际内存的一部分；长期只涨不降才说明有泄露"><span>Go 堆</span><b>{{ status.heapMB }} MB</b></div>
+              <div class="kv" title="Go 的轻量线程，每条连接用几个；空闲约 15 个，连接断开后回落"><span>协程数</span><b>{{ status.goroutines }}</b></div>
+              <div class="kv" title="同时并行运行的线程数（GOMAXPROCS）"><span>CPU 线程</span><b>{{ status.maxProcs }}</b></div>
+              <div class="kv"><span>运行时长</span><b>{{ fmtDur(status.uptime) }}</b></div>
+              <div class="kv"><span>累计连接（本地服务）</span><b>{{ status.conns || 0 }}</b></div>
+              <div v-if="status.lastErr" class="text-danger mt-2 text-break">最近错误（{{ ago(status.lastErrAt) }}）：{{ status.lastErr }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ 服务端 ============ -->
+    <template v-if="page === 'servers'">
+      <div class="card">
+        <div class="card-header d-flex flex-wrap align-items-center gap-2">
+          <span class="fw-semibold me-auto">服务端 <span class="small text-body-secondary fw-normal">每个服务端是一条 VLESS 反向隧道</span></span>
+          <button class="btn btn-outline-secondary btn-sm" @click="openImport()">从分享链接导入</button>
+          <button class="btn btn-success btn-sm" @click="editServer(-1)">+ 添加服务端</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped table-hover align-middle mb-0">
+            <thead><tr><th>名称</th><th>地址</th><th>安全</th><th>状态</th><th title="实时 上传 / 下载">实时 ↑ / ↓</th><th title="自程序启动累计">累计 ↑ / ↓</th><th title="当前隧道连接 / 累计拨号 / 失败">隧道 / 拨号 / 失败</th><th class="text-end">操作</th></tr></thead>
+            <tbody>
+              <tr v-if="!draft.servers.length"><td colspan="8" class="text-center text-body-secondary py-4">还没有服务端，点“添加服务端”或“从分享链接导入”</td></tr>
+              <tr v-for="(s, i) in draft.servers" :key="i">
+                <td class="fw-semibold">{{ s.name }}</td>
+                <td><code>{{ s.server || '-' }}</code></td>
+                <td>{{ s.security === 'reality' ? 'REALITY' : 'Encryption' }}<span v-if="s.security === 'reality' && s.encryption && s.encryption !== 'none'"> + Enc</span></td>
+                <td>
+                  <span class="badge" :class="stateBadge(srvState(s))">{{ stateText(srvState(s)) }}</span>
+                  <div class="small text-body-secondary" v-if="sv(s)">{{ sv(s).state === 'online' && sv(s).since ? '已连接 ' + fmtDur((Date.now() - sv(s).since) / 1000) : sv(s).detail }}</div>
+                </td>
+                <td class="text-nowrap">{{ fmtRate(srvRate(s).up) }} / {{ fmtRate(srvRate(s).down) }}</td>
+                <td class="text-nowrap">{{ fmtBytes(sv(s)?.tx) }} / {{ fmtBytes(sv(s)?.rx) }}</td>
+                <td>{{ sv(s)?.tunnels ?? '-' }} / {{ sv(s)?.dials ?? '-' }} / <span :class="{ 'text-danger': sv(s)?.fails }">{{ sv(s)?.fails ?? '-' }}</span>
+                  <div v-if="sv(s)?.lastErr" class="small text-danger text-break">{{ sv(s).lastErr }}</div></td>
+                <td class="text-end text-nowrap">
+                  <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-primary" @click="editServer(i)">编辑</button>
+                    <button class="btn btn-outline-secondary" @click="showSnippet(i)">服务端配置</button>
+                    <button class="btn btn-outline-secondary" @click="copyLink(s)">复制链接</button>
+                    <button class="btn btn-outline-secondary" @click="s.disabled = !s.disabled">{{ s.disabled ? '启用' : '停用' }}</button>
+                    <button class="btn btn-outline-danger" @click="removeServer(i)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ 出站（本地服务） ============ -->
+    <template v-if="page === 'outlets'">
+      <div class="card">
+        <div class="card-header d-flex flex-wrap align-items-center gap-2">
+          <span class="fw-semibold me-auto">出站（允许访问的本地服务） <span class="small text-body-secondary fw-normal">未列出的目标、未选择的协议、未授权的服务端一律拒绝</span></span>
+          <button class="btn btn-success btn-sm" @click="editOutlet(-1)">+ 添加出站</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped table-hover align-middle mb-0">
+            <thead><tr><th>名称</th><th>本地目标</th><th>协议</th><th title="服务端上对外开放的端口（只用于生成服务端配置和拓扑图）">对外端口</th><th>允许的服务端</th><th title="最近 30 次检测：柱高 = 延迟，红色 = 失败">健康检测</th><th title="当前 TCP 连接数（UDP 不统计）">当前连接</th><th title="上传 = 本地服务返回给外部；下载 = 外部发给本地服务">实时 ↑ / ↓</th><th title="自程序启动累计">失败</th><th>最近错误</th><th class="text-end">操作</th></tr></thead>
+            <tbody>
+              <tr v-if="!draft.allow.length"><td colspan="11" class="text-center text-body-secondary py-4">还没有出站</td></tr>
+              <tr v-for="(a, i) in draft.allow" :key="i">
+                <td class="fw-semibold">{{ a.name || '-' }}</td>
+                <td><code>{{ a.target }}</code></td>
+                <td>{{ netLabel(a.network) }}</td>
+                <td>{{ a.remotePort || '-' }}</td>
+                <td><span v-if="!a.servers || !a.servers.length" class="badge text-bg-secondary">全部</span>
+                  <span v-for="n in a.servers" :key="n" class="badge text-bg-info me-1">{{ n }}</span></td>
+                <td class="text-nowrap">
+                  <template v-if="a.health && a.health.enabled">
+                    <span class="badge" :class="healthBadge(hv(a))" :title="hv(a)?.lastErr || ''">{{ healthText(hv(a)) }}</span>
+                    <svg class="spark ms-1" viewBox="0 0 90 16" preserveAspectRatio="none"><rect v-for="(b, k) in spark(hv(a))" :key="k" :x="b.x" :y="b.y" width="2" :height="b.h" :class="b.bad ? 'bad' : 'ok'"></rect></svg>
+                    <div class="small text-body-secondary">{{ a.health.type.toUpperCase() }} · {{ hv(a)?.lastCheck ? ago(hv(a).lastCheck) : '待应用' }}</div>
+                    <div v-if="hv(a)?.status === 'down'" class="small text-danger text-wrap">{{ hv(a).lastErr }}</div>
+                  </template>
+                  <span v-else class="small text-body-secondary">未开启</span>
+                </td>
+                <td>{{ outStat(a).tcp ? outStat(a).active : '-' }}</td>
+                <td class="text-nowrap">{{ fmtRate(outStat(a).up) }} / {{ fmtRate(outStat(a).down) }}</td>
+                <td :class="{ 'text-danger': outStat(a).fails }">{{ outStat(a).fails }}</td>
+                <td class="small text-break" :class="outStat(a).err ? 'text-danger' : 'text-body-secondary'">{{ outStat(a).err || '-' }}</td>
+                <td class="text-end text-nowrap">
+                  <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-primary" @click="editOutlet(i)">编辑</button>
+                    <button class="btn btn-outline-danger" @click="draft.allow.splice(i, 1)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ 系统 ============ -->
+    <template v-if="page === 'system'">
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="card h-100">
+            <div class="card-header fw-semibold">运行参数</div>
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-sm-6"><label class="form-label">日志级别</label>
+                  <select class="form-select" v-model="draft.logLevel"><option>warning</option><option>info</option><option>debug</option><option>error</option><option>none</option></select></div>
+                <div class="col-sm-6"><label class="form-label">CPU 线程（GOMAXPROCS）</label>
+                  <input class="form-control" type="number" min="0" v-model.number="draft.memory.maxProcs">
+                  <div class="form-text">0 = 使用全部 CPU 线程；当前 {{ status.maxProcs }}</div></div>
+                <div class="col-sm-6"><label class="form-label">内存软上限 MB</label>
+                  <input class="form-control" type="number" min="0" v-model.number="draft.memory.limitMB">
+                  <div class="form-text">0 = 不限；太低会频繁 GC，建议 ≥ 32</div></div>
+                <div class="col-sm-6"><label class="form-label">GC 百分比</label>
+                  <input class="form-control" type="number" min="0" v-model.number="draft.memory.gcPercent">
+                  <div class="form-text">默认 50，越小越省内存、越费 CPU</div></div>
+                <div class="col-sm-6"><label class="form-label">每连接缓冲 KB</label>
+                  <input class="form-control" type="number" min="0" v-model.number="draft.memory.bufferKB">
+                  <div class="form-text">默认 16（官方 amd64 为 512）</div></div>
+                <div class="col-sm-6"><label class="form-label">归还内存间隔 秒</label>
+                  <input class="form-control" type="number" v-model.number="draft.memory.trimSec">
+                  <div class="form-text">0 = 默认 60，负数关闭（重启程序后生效）</div></div>
+              </div>
+              <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-outline-secondary" @click="restart">重新连接全部服务端</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card mb-3">
+            <div class="card-header fw-semibold">登录账号</div>
+            <form class="card-body" @submit.prevent="changePassword">
+              <div class="row g-3">
+                <div class="col-sm-6"><label class="form-label">用户名</label><input class="form-control" v-model.trim="pwForm.user" autocomplete="username"></div>
+                <div class="col-sm-6"><label class="form-label">原密码</label><input class="form-control" type="password" v-model="pwForm.old" autocomplete="current-password"></div>
+                <div class="col-sm-6"><label class="form-label">新密码（至少 6 位）</label><input class="form-control" type="password" v-model="pwForm.new1" autocomplete="new-password"></div>
+                <div class="col-sm-6"><label class="form-label">确认新密码</label><input class="form-control" type="password" v-model="pwForm.new2" autocomplete="new-password"></div>
+              </div>
+              <div v-if="pwForm.err" class="alert alert-danger py-2 small mt-3 mb-0">{{ pwForm.err }}</div>
+              <button class="btn btn-primary mt-3" :disabled="pwForm.busy">修改密码</button>
+              <span class="form-text ms-2">立即生效，其他已登录的会话会被退出</span>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-header fw-semibold">关于</div>
+            <div class="card-body small">
+              <div class="kv"><span>Xray-core</span><b>{{ status.version }}</b></div>
+              <div class="kv"><span>管理网页监听</span><b>由配置文件 web.listen 决定，网页中不可修改</b></div>
+              <div class="kv"><span>前端</span><b>Vue 3.5.13 · Bootstrap 5.3.3（MIT）</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header fw-semibold">日志 <span class="small text-body-secondary fw-normal">最近 200 条</span></div>
+            <div class="card-body p-0"><pre class="logbox m-0" ref="logbox">{{ logs.length ? logs.join('\n') : '（暂无日志）' }}</pre></div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ 未保存的更改 ============ -->
+    <template v-if="page === 'changes'">
+      <div class="card">
+        <div class="card-header d-flex align-items-center gap-2">
+          <span class="fw-semibold me-auto">未保存的更改</span>
+          <button class="btn btn-outline-danger btn-sm" :disabled="!dirty" @click="revert">放弃更改</button>
+          <button class="btn btn-primary btn-sm" :disabled="!dirty || saving" @click="saveApply">保存并应用</button>
+        </div>
+        <div class="card-body">
+          <div v-if="!dirty" class="text-body-secondary">没有未保存的更改</div>
+          <ul v-else class="mb-0"><li v-for="c in changes" :key="c">{{ c }}</li></ul>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <!-- ============ 弹窗：服务端编辑 ============ -->
+  <div v-if="srvEdit" class="modal d-block" tabindex="-1" @click.self="srvEdit = null">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">{{ srvEdit.index < 0 ? '添加服务端' : '编辑服务端' }}</h5><button type="button" class="btn-close" @click="srvEdit = null"></button></div>
+        <div class="modal-body">
+          <div class="input-group input-group-sm mb-3">
+            <input class="form-control" v-model="srvEdit.link" placeholder="粘贴 vless:// 分享链接自动填写（3x-ui / Xray 标准格式）">
+            <button class="btn btn-outline-secondary" @click="fillFromLink(srvEdit)">解析链接</button>
+          </div>
+          <div class="row g-3">
+            <div class="col-sm-6"><label class="form-label">名称</label><input class="form-control" v-model.trim="srvEdit.s.name" placeholder="如：上海"></div>
+            <div class="col-sm-6"><label class="form-label">地址 host:port</label><input class="form-control" v-model.trim="srvEdit.s.server" placeholder="1.2.3.4:443"></div>
+            <div class="col-sm-6"><label class="form-label">UUID</label>
+              <div class="input-group"><input class="form-control" v-model.trim="srvEdit.s.uuid"><button class="btn btn-outline-secondary" @click="gen('uuid').then(r => srvEdit.s.uuid = r.uuid)">生成</button></div></div>
+            <div class="col-sm-6"><label class="form-label">flow</label>
+              <select class="form-select" v-model="srvEdit.s.flow"><option value="xtls-rprx-vision">xtls-rprx-vision</option><option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option><option value="">（无）</option></select></div>
+            <div class="col-sm-6"><label class="form-label">传输安全</label>
+              <select class="form-select" v-model="srvEdit.s.security"><option value="reality">VLESS + REALITY</option><option value="none">VLESS + Encryption（无 TLS）</option></select></div>
+          </div>
+
+          <template v-if="srvEdit.s.security === 'reality'">
+            <h6 class="sec-title">REALITY</h6>
+            <div class="row g-3">
+              <div class="col-sm-6"><label class="form-label">serverName (sni)</label><input class="form-control" v-model.trim="srvEdit.s.reality.serverName"></div>
+              <div class="col-sm-6"><label class="form-label">fingerprint (fp)</label>
+                <select class="form-select" v-model="srvEdit.s.reality.fingerprint"><option v-for="f in fps" :key="f">{{ f }}</option></select></div>
+              <div class="col-12"><label class="form-label">password / 公钥 (pbk)</label>
+                <div class="input-group"><input class="form-control" v-model.trim="srvEdit.s.reality.password">
+                  <button class="btn btn-outline-secondary" title="生成新密钥对：公钥填这里，私钥写进服务端配置片段" @click="genReality(srvEdit)">生成密钥对</button></div></div>
+              <div class="col-sm-6"><label class="form-label">shortId (sid)</label>
+                <div class="input-group"><input class="form-control" v-model.trim="srvEdit.s.reality.shortId"><button class="btn btn-outline-secondary" @click="gen('shortid').then(r => srvEdit.s.reality.shortId = r.shortId)">生成</button></div></div>
+              <div class="col-sm-6"><label class="form-label">spiderX (spx)</label><input class="form-control" v-model.trim="srvEdit.s.reality.spiderX" placeholder="/"></div>
+              <div class="col-12"><label class="form-label">mldsa65Verify (pqv，可选)</label><input class="form-control" v-model.trim="srvEdit.s.reality.mldsa65Verify"></div>
+            </div>
+          </template>
+
+          <h6 class="sec-title">VLESS Encryption <small class="text-body-secondary fw-normal">REALITY 下一般为 none；无 TLS 时必填</small></h6>
+          <div class="row g-3">
+            <div class="col-12"><input class="form-control" v-model.trim="srvEdit.s.encryption" placeholder="none 或 mlkem768x25519plus.native.0rtt.xxxx"></div>
+            <div class="col-sm-5"><select class="form-select" v-model="encAuth"><option value="x25519">X25519 认证（短）</option><option value="mlkem768">ML-KEM-768 认证（后量子）</option></select></div>
+            <div class="col-sm-4"><select class="form-select" v-model="encMode"><option value="native">native</option><option value="xorpub">xorpub</option><option value="random">random</option></select></div>
+            <div class="col-sm-3"><button class="btn btn-outline-secondary w-100" @click="genEnc(srvEdit)">生成密钥对</button></div>
+          </div>
+
+          <h6 class="sec-title">Vision 填充 (testseed) <small class="text-body-secondary fw-normal">留空用默认 900/500/900/256，只影响本端</small></h6>
+          <div class="row g-2">
+            <div class="col-3" v-for="(ph, k) in [900, 500, 900, 256]" :key="k"><input class="form-control" type="number" :placeholder="ph" v-model="srvEdit.seed[k]"></div>
+          </div>
+
+          <div class="form-text mt-3">reverse tag 由客户端自动生成，不需要和服务端一致；服务端那边的 tag 见“服务端配置”。</div>
+          <div class="form-check form-switch mt-2"><input class="form-check-input" type="checkbox" id="sd" v-model="srvEdit.s.disabled"><label class="form-check-label" for="sd">停用这个服务端</label></div>
+          <div v-if="srvEdit.err" class="alert alert-danger mt-3 mb-0 py-2">{{ srvEdit.err }}</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" @click="srvEdit = null">取消</button><button class="btn btn-primary" @click="commitServer">确定</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 弹窗：出站编辑 ============ -->
+  <div v-if="outEdit" class="modal d-block" tabindex="-1" @click.self="outEdit = null">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">{{ outEdit.index < 0 ? '添加出站' : '编辑出站' }}</h5><button type="button" class="btn-close" @click="outEdit = null"></button></div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-sm-6"><label class="form-label">名称</label><input class="form-control" v-model.trim="outEdit.a.name" placeholder="ssh"></div>
+            <div class="col-sm-6"><label class="form-label">协议</label>
+              <select class="form-select" v-model="outEdit.a.network"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp,udp">TCP+UDP</option></select></div>
+            <div class="col-12"><label class="form-label">本地目标</label><input class="form-control" v-model.trim="outEdit.a.target" placeholder="127.0.0.1:22">
+              <div class="form-text">IP 或网段 + 端口或范围，如 192.168.1.10:80、192.168.1.0/24:8000-8100；不支持域名</div></div>
+            <div class="col-sm-6"><label class="form-label">服务端对外端口</label><input class="form-control" type="number" min="1" max="65535" v-model.number="outEdit.a.remotePort" placeholder="6022">
+              <div class="form-text">只用于生成服务端配置和拓扑图</div></div>
+            <div class="col-12"><label class="form-label">允许的服务端</label>
+              <div class="form-check"><input class="form-check-input" type="checkbox" id="sa" v-model="outEdit.all"><label class="form-check-label" for="sa">全部服务端（含以后新增的）</label></div>
+              <div v-if="!outEdit.all" class="d-flex flex-wrap gap-3 mt-1">
+                <div class="form-check" v-for="s in draft.servers" :key="s.name"><input class="form-check-input" type="checkbox" :id="'os-' + s.name" :value="s.name" v-model="outEdit.sel"><label class="form-check-label" :for="'os-' + s.name">{{ s.name }}</label></div>
+              </div></div>
+          </div>
+
+          <h6 class="sec-title d-flex align-items-center">健康检测
+            <div class="form-check form-switch ms-auto mb-0 fw-normal small">
+              <input class="form-check-input" type="checkbox" id="hc-on" v-model="outEdit.a.health.enabled" @change="suggestHealth(outEdit)">
+              <label class="form-check-label" for="hc-on">{{ outEdit.a.health.enabled ? '已开启' : '关闭' }}</label></div></h6>
+          <div v-if="outEdit.a.health.enabled" class="row g-3">
+            <div class="col-sm-4"><label class="form-label">检测方式</label>
+              <select class="form-select" v-model="outEdit.a.health.type" @change="outEdit.touched = true">
+                <option value="tcp">TCP 端口</option><option value="http">HTTP</option><option value="https">HTTPS</option><option value="udp">UDP</option></select></div>
+            <div class="col-sm-8"><label class="form-label">检测地址</label>
+              <input class="form-control" v-model.trim="outEdit.a.health.target" :placeholder="/^\[?[0-9a-fA-F.:]+\]?:\d+$/.test(outEdit.a.target) ? '留空 = ' + outEdit.a.target : '网段/端口范围需填写，如 192.168.1.10:80'"></div>
+            <template v-if="outEdit.a.health.type === 'http' || outEdit.a.health.type === 'https'">
+              <div class="col-sm-4"><label class="form-label">路径</label><input class="form-control" v-model.trim="outEdit.a.health.path" placeholder="/"></div>
+              <div class="col-sm-8 d-flex flex-column justify-content-end gap-1">
+                <div v-if="outEdit.a.health.type === 'https'" class="form-check"><input class="form-check-input" type="checkbox" id="hc-ins" v-model="outEdit.a.health.insecure"><label class="form-check-label" for="hc-ins">忽略证书校验（自签名证书需要勾选）</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="hc-any" v-model="outEdit.a.health.anyStatus"><label class="form-check-label" for="hc-any">任何 HTTP 状态码都算正常（默认 4xx/5xx 算异常）</label></div>
+              </div>
+            </template>
+            <template v-if="outEdit.a.health.type === 'udp'">
+              <div class="col-sm-8"><label class="form-label">探测内容</label><input class="form-control" v-model="outEdit.a.health.payload" placeholder="默认发一个换行；十六进制写成 hex:0102ab">
+                <div class="form-text">DNS 等协议需要合法请求才会回复，可填十六进制报文</div></div>
+              <div class="col-sm-4 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" id="hc-rep" v-model="outEdit.a.health.expectReply"><label class="form-check-label" for="hc-rep">必须收到回复</label></div></div>
+              <div class="col-12 form-text mt-0">不勾选时：只要没收到“端口不可达”就算正常（UDP 无法确认对方一定在工作）</div>
+            </template>
+            <div class="col-sm-4"><label class="form-label">间隔（秒）</label><input class="form-control" type="number" min="5" v-model.number="outEdit.a.health.interval"></div>
+            <div class="col-sm-4"><label class="form-label">超时（秒）</label><input class="form-control" type="number" min="1" max="60" v-model.number="outEdit.a.health.timeout"></div>
+          </div>
+          <div v-else class="form-text">开启后会定时检测本地服务是否可用，结果显示在“出站”列表和拓扑图的连线上。</div>
+          <div v-if="outEdit.err" class="alert alert-danger mt-3 mb-0 py-2">{{ outEdit.err }}</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" @click="outEdit = null">取消</button><button class="btn btn-primary" @click="commitOutlet">确定</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 弹窗：服务端配置片段 ============ -->
+  <div v-if="snip" class="modal d-block" tabindex="-1" @click.self="snip = null">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">服务端配置片段 · {{ snip.name }}</h5><button type="button" class="btn-close" @click="snip = null"></button></div>
+        <div class="modal-body">
+          <p class="small text-body-secondary">合并进官方 Xray 服务端配置：一个 client（带 reverse tag），每个出站一个 tunnel 入站，再用路由把这些入站指到该 tag。{{ snip.hint }}</p>
+          <textarea class="form-control font-monospace small" rows="18" readonly :value="snip.text"></textarea>
+        </div>
+        <div class="modal-footer"><button class="btn btn-primary" @click="copy(snip.text).then(() => toast('已复制'))">复制</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="srvEdit || outEdit || snip" class="modal-backdrop show"></div>
+</template>
+
+</script>
+
+<script src="vendor/vue.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

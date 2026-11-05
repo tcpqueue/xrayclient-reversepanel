@@ -1,0 +1,25 @@
+[Unit]
+Description=xray-lite (VLESS reverse client)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/xray-lite
+ExecStart=/usr/local/xray-lite/xray-lite -c /usr/local/xray-lite/config.json
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+# 加固：只允许写自己的目录（网页保存配置需要）
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/usr/local/xray-lite
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

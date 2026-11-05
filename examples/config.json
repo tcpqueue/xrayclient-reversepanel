@@ -1,0 +1,36 @@
+{
+  "servers": [
+    {
+      "name": "上海",
+      "server": "your.server.ip:443",
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "flow": "xtls-rprx-vision",
+      "security": "reality",
+      "encryption": "none",
+      "reality": {
+        "serverName": "www.example.com",
+        "password": "服务端 REALITY 私钥对应的公钥（xray x25519 的 Password）",
+        "shortId": "0123456789abcdef",
+        "fingerprint": "chrome"
+      }
+    },
+    {
+      "name": "香港",
+      "server": "your.other.server:8443",
+      "uuid": "11111111-1111-1111-1111-111111111111",
+      "flow": "xtls-rprx-vision",
+      "security": "none",
+      "encryption": "mlkem768x25519plus.native.0rtt.服务端 decryption 对应的客户端公钥"
+    }
+  ],
+  "allow": [
+    {"name": "ssh", "target": "127.0.0.1:22", "remotePort": 6022,
+     "health": {"enabled": true, "type": "tcp"}},
+    {"name": "nas", "target": "192.168.1.10:5000", "remotePort": 6050, "servers": ["上海"],
+     "health": {"enabled": true, "type": "https", "insecure": true}},
+    {"name": "dns", "target": "192.168.1.1:53", "network": "udp", "remotePort": 6053, "servers": ["香港"]}
+  ],
+  "logLevel": "warning",
+  "memory": {"limitMB": 32, "gcPercent": 50, "bufferKB": 16, "maxProcs": 0, "trimSec": 60},
+  "web": {"listen": "0.0.0.0:7400"}
+}

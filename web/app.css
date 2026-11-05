@@ -1,0 +1,119 @@
+/* xray-lite：在 Bootstrap 5 基础上做成 LuCI bootstrap 主题的观感 */
+:root {
+  --xl-busy: #20c05c;
+  --xl-idle: #3b82f6;
+  --xl-down: #e5484d;
+  --xl-off: #9aa1ab;
+  --xl-up: #3b82f6;
+  --xl-dn: #20c05c;
+}
+body { background: var(--bs-tertiary-bg); font-size: 14px; }
+[data-bs-theme="dark"] body { background: #111418; }
+.navbar-brand small { font-size: 12px; }
+.navbar .nav-link.active { font-weight: 600; }
+.card { border-radius: .5rem; }
+.card-header { background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color); font-size: 14px; }
+.table { font-size: 13px; }
+.table th { white-space: nowrap; font-weight: 600; color: var(--bs-secondary-color); font-size: 12px; }
+code { font-size: 12px; }
+.sec-title { margin: 1.2rem 0 .6rem; font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--bs-border-color); padding-bottom: .35rem; }
+.form-label { font-size: 12px; color: var(--bs-secondary-color); margin-bottom: .2rem; }
+.form-text { font-size: 11px; }
+
+/* 提示条 */
+.toast-stack { position: fixed; right: 16px; top: 64px; z-index: 2000; max-width: min(420px, calc(100vw - 32px)); }
+
+/* 概览数字块 */
+.tile .tile-k { font-size: 12px; color: var(--bs-secondary-color); }
+.tile .tile-v { font-size: 26px; font-weight: 600; line-height: 1.25; margin: .2rem 0; font-variant-numeric: tabular-nums; word-break: break-all; }
+.tile .tile-s { font-size: 12px; color: var(--bs-secondary-color); }
+.kv { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px dashed var(--bs-border-color); }
+.kv:last-child { border-bottom: 0; }
+.kv b { font-weight: 500; text-align: right; word-break: break-all; }
+
+/* 图例 */
+.legend { font-size: 12px; color: var(--bs-secondary-color); display: inline-flex; align-items: center; gap: .35rem; }
+.lg { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: .25rem; }
+.lg.busy { border-color: var(--xl-busy); }
+.lg.idle { border-color: var(--xl-idle); }
+.lg.down { border-color: var(--xl-down); border-top-style: dashed; }
+.lg.disabled { border-color: var(--xl-off); border-top-style: dotted; }
+.lg.up { border-color: var(--xl-up); }
+.lg.down-c { border-color: var(--xl-dn); }
+
+/* 拓扑图 */
+svg.topo { width: 100%; height: auto; display: block; }
+.topo .col-title { font-size: 12px; fill: var(--bs-secondary-color); text-anchor: middle; font-weight: 600; }
+.topo-wrap { position: relative; }
+.topo .edge { fill: none; stroke-width: 2.5; transition: opacity .15s; pointer-events: none; } /* 让鼠标落到下面更宽的感应线上 */
+.topo-tip { position: absolute; z-index: 5; pointer-events: none; min-width: 220px; max-width: 320px; background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem; font-size: 12px; line-height: 1.6; word-break: break-all; }
+.topo-tip .lg { width: 16px; margin-right: 0; }
+.topo .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+.topo .edge.busy { stroke: var(--xl-busy); stroke-dasharray: 9 6; animation: xl-flow .7s linear infinite; }
+.topo .edge.idle { stroke: var(--xl-idle); opacity: .75; }
+.topo .edge.down { stroke: var(--xl-down); stroke-dasharray: 5 5; }
+.topo .edge.disabled { stroke: var(--xl-off); stroke-dasharray: 2 5; opacity: .7; }
+.topo .edge.hot { stroke-width: 4; opacity: 1; }
+.topo .dim { opacity: .18; }
+@keyframes xl-flow { to { stroke-dashoffset: -15; } }
+@media (prefers-reduced-motion: reduce) { .topo .edge.busy { animation: none; } }
+
+.topo .node { cursor: pointer; transition: opacity .15s; }
+.topo .node rect { fill: var(--bs-body-bg); stroke: var(--bs-border-color); stroke-width: 1.5; }
+.topo .node:hover rect { stroke: var(--bs-primary); }
+.topo .node .n1 { font-size: 13px; font-weight: 600; fill: var(--bs-body-color); }
+.topo .node .n2 { font-size: 11px; fill: var(--bs-secondary-color); }
+.topo .node .dot { fill: var(--xl-off); }
+.topo .node text { pointer-events: none; }
+.topo .node.online .dot, .topo .node.busy .dot, .topo .node.ok .dot, .topo .node.idle .dot { fill: var(--xl-busy); }
+.topo .node.idle .dot { fill: var(--xl-idle); }
+.topo .node.connecting .dot, .topo .node.pending .dot { fill: #f5a524; }
+.topo .node.offline .dot, .topo .node.down .dot, .topo .node.err .dot { fill: var(--xl-down); }
+.topo .node.err rect, .topo .node.offline rect { stroke: var(--xl-down); }
+.topo .node.srv rect { stroke-width: 2; }
+
+/* 流量曲线 */
+svg.chart { width: 100%; height: 160px; display: block; background: var(--bs-tertiary-bg); border-radius: .375rem; }
+.chart .grid { stroke: var(--bs-border-color); stroke-width: 1; stroke-dasharray: 3 4; }
+.chart polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart .up { stroke: var(--xl-up); }
+.chart .down { stroke: var(--xl-dn); }
+
+/* 日志 */
+.logbox { max-height: 380px; overflow: auto; padding: .75rem 1rem; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; background: var(--bs-tertiary-bg); }
+
+/* 登录页 */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-card { width: 100%; max-width: 360px; }
+.login-card .brand { font-size: 22px; font-weight: 600; }
+
+/* 弹窗（不依赖 bootstrap.js） */
+.modal.d-block { overflow-y: auto; }
+
+/* 健康检测 / 本体节点 */
+.lg.unknown { border-color: var(--xl-off); opacity: .6; }
+.topo .edge.unknown { stroke: var(--xl-off); opacity: .55; }
+.topo .node.unknown .dot { fill: var(--xl-off); }
+.topo .node.core rect { stroke: var(--bs-primary); stroke-width: 2; fill: var(--bs-primary-bg-subtle); }
+.topo .node.core.online .dot, .topo .node.core.partial .dot { fill: var(--xl-busy); }
+.topo .node.core.partial .dot { fill: #f5a524; }
+svg.spark { width: 90px; height: 16px; vertical-align: middle; }
+.spark rect.ok { fill: var(--xl-busy); }
+.spark rect.bad { fill: var(--xl-down); }
+
+/* 流量曲线：坐标轴、悬停 */
+.chart-box { display: grid; grid-template-columns: 70px 1fr; gap: 6px; }
+.chart-y { position: relative; height: 160px; font-size: 11px; color: var(--bs-secondary-color); }
+.chart-y span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chart-plot { position: relative; cursor: crosshair; }
+.chart .cursor { stroke: var(--bs-secondary-color); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.chart-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--bs-secondary-color); margin-top: 2px; }
+.chart-dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--bs-body-bg); transform: translate(-50%, -50%); pointer-events: none; }
+.chart-tip { position: absolute; top: 6px; z-index: 4; pointer-events: none; min-width: 170px; background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .45rem .7rem; font-size: 12px; line-height: 1.6; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; }
+.hrow { display: grid; grid-template-columns: 70px 1fr; gap: 6px; align-items: center; margin-bottom: 3px; }
+.hrow .hname { font-size: 11px; color: var(--bs-secondary-color); text-align: right; }
+.hrow svg { width: 100%; height: 10px; display: block; background: var(--bs-tertiary-bg); border-radius: 2px; }
+.hrow rect.up { fill: var(--xl-busy); }
+.hrow rect.down { fill: var(--xl-down); }
+.hrow rect.na { fill: var(--xl-off); opacity: .4; }

@@ -1,0 +1,16 @@
+# 编译产物
+/dist/
+*.exe
+*.exe~
+/xray-lite
+/xray-lite-*
+
+# 本地运行配置（含密钥/密码），不要提交
+/config.json
+/config.json.bak
+*.tmp
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
