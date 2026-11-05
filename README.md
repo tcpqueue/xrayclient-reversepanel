@@ -106,7 +106,7 @@ docker compose up -d
 docker compose logs   # 首次启动会打印初始账号密码
 ```
 
-镜像 `ghcr.io/tcpqueue/xrayclient-reversepanel`（amd64 / 386 / arm64 / armv7 / armv6 / riscv64）。配置和证书在 `./data`，模板默认使用 **host 网络**，这样容器里的 `127.0.0.1` 就是宿主机，可以直接反代宿主机上的服务。容器内查看设置 / 重置密码：
+镜像 `ghcr.io/tcpqueue/xrayclient-reversepanel`（amd64 / 386 / arm64 / armv7 / armv6 / riscv64，由 GitHub Actions 发布）；也可以克隆仓库后在 `docker-compose.yml` 里启用 `build: .`，用 `docker compose up -d --build` 本地构建。配置和证书在 `./data`，模板默认使用 **host 网络**，这样容器里的 `127.0.0.1` 就是宿主机，可以直接反代宿主机上的服务。容器内查看设置 / 重置密码：
 
 ```bash
 docker compose exec xrayclient-reversepanel /app/xrayclient-reversepanel info

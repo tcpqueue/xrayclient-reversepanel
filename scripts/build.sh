@@ -49,12 +49,18 @@ echo "$TARGETS" | while read -r arch goos goarch extra; do
 		go build -trimpath -ldflags "$LDFLAGS" -o "$work/$exe" .
 	cp LICENSE README.md "$work/"
 	if [ "$goos" = windows ]; then
-		(cd "$work" && zip -q -9 "../$NAME-$arch.zip" "$exe" LICENSE README.md)
+		if command -v zip >/dev/null 2>&1; then
+			(cd "$work" && zip -q -9 "../$NAME-$arch.zip" "$exe" LICENSE README.md)
+		else
+			(cd "$work" && python3 -m zipfile -c "../$NAME-$arch.zip" "$exe" LICENSE README.md)
+		fi
 	else
 		cp install.sh "$work/install.sh"
-		chmod 755 "$work/$exe" "$work/install.sh"
-		tar -C "$work" -czf "$OUT/$NAME-linux-$arch.tar.gz" --owner=0 --group=0 "$exe" install.sh LICENSE README.md 2>/dev/null ||
-			tar -C "$work" -czf "$OUT/$NAME-linux-$arch.tar.gz" "$exe" install.sh LICENSE README.md
+		# 显式设置权限（在 Windows 上打包时文件系统没有可执行位）；需要 GNU tar
+		tarf="$OUT/$NAME-linux-$arch.tar"
+		tar -C "$work" -cf "$tarf" --owner=0 --group=0 --mode=0755 "$exe" install.sh
+		tar -C "$work" -rf "$tarf" --owner=0 --group=0 --mode=0644 LICENSE README.md
+		gzip -9 -n -f "$tarf"
 	fi
 	rm -rf "$work"
 done

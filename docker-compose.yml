@@ -8,6 +8,8 @@
 services:
   xrayclient-reversepanel:
     image: ghcr.io/tcpqueue/xrayclient-reversepanel:latest
+    # 拉不到镜像时，在仓库目录里取消下一行注释，用 docker compose up -d --build 本地构建
+    # build: .
     container_name: xrayclient-reversepanel
     restart: unless-stopped
     # 推荐 host 网络：容器里的 127.0.0.1 就是宿主机，能直接把宿主机上的服务（如 127.0.0.1:22）反代出去；
